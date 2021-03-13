@@ -5,22 +5,26 @@
  */
 
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Threading.Tasks;
-using JetBrains.Annotations;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
-using Newtonsoft.Json.Linq;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Server.OpenIddictServerEvents;
 using static OpenIddict.Server.OpenIddictServerHandlerFilters;
-using Properties = OpenIddict.Server.OpenIddictServerConstants.Properties;
+using SR = OpenIddict.Abstractions.OpenIddictResources;
 
 namespace OpenIddict.Server
 {
@@ -35,7 +39,7 @@ namespace OpenIddict.Server
                 ExtractIntrospectionRequest.Descriptor,
                 ValidateIntrospectionRequest.Descriptor,
                 HandleIntrospectionRequest.Descriptor,
-                ApplyIntrospectionResponse<ProcessErrorResponseContext>.Descriptor,
+                ApplyIntrospectionResponse<ProcessErrorContext>.Descriptor,
                 ApplyIntrospectionResponse<ProcessRequestContext>.Descriptor,
 
                 /*
@@ -44,9 +48,11 @@ namespace OpenIddict.Server
                 ValidateTokenParameter.Descriptor,
                 ValidateClientIdParameter.Descriptor,
                 ValidateClientId.Descriptor,
+                ValidateClientType.Descriptor,
                 ValidateClientSecret.Descriptor,
                 ValidateEndpointPermissions.Descriptor,
                 ValidateToken.Descriptor,
+                ValidateTokenType.Descriptor,
                 ValidateAuthorizedParty.Descriptor,
 
                 /*
@@ -66,41 +72,32 @@ namespace OpenIddict.Server
             /// </summary>
             public class ExtractIntrospectionRequest : IOpenIddictServerHandler<ProcessRequestContext>
             {
-                private readonly IOpenIddictServerProvider _provider;
+                private readonly IOpenIddictServerDispatcher _dispatcher;
 
-                public ExtractIntrospectionRequest([NotNull] IOpenIddictServerProvider provider)
-                    => _provider = provider;
+                public ExtractIntrospectionRequest(IOpenIddictServerDispatcher dispatcher)
+                    => _dispatcher = dispatcher;
 
                 /// <summary>
                 /// Gets the default descriptor definition assigned to this handler.
                 /// </summary>
                 public static OpenIddictServerHandlerDescriptor Descriptor { get; }
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessRequestContext>()
+                        .AddFilter<RequireIntrospectionRequest>()
                         .UseScopedHandler<ExtractIntrospectionRequest>()
-                        .SetOrder(int.MinValue + 100_000)
+                        .SetOrder(100_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ProcessRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ProcessRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
-                    if (context.EndpointType != OpenIddictServerEndpointType.Introspection)
-                    {
-                        return;
-                    }
-
                     var notification = new ExtractIntrospectionRequestContext(context.Transaction);
-                    await _provider.DispatchAsync(notification);
+                    await _dispatcher.DispatchAsync(notification);
 
                     if (notification.IsRequestHandled)
                     {
@@ -123,16 +120,12 @@ namespace OpenIddict.Server
                         return;
                     }
 
-                    if (notification.Request == null)
+                    if (notification.Request is null)
                     {
-                        throw new InvalidOperationException(new StringBuilder()
-                            .Append("The introspection request was not correctly extracted. To extract introspection requests, ")
-                            .Append("create a class implementing 'IOpenIddictServerHandler<ExtractIntrospectionRequestContext>' ")
-                            .AppendLine("and register it using 'services.AddOpenIddict().AddServer().AddEventHandler()'.")
-                            .ToString());
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0046));
                     }
 
-                    context.Logger.LogInformation("The introspection request was successfully extracted: {Request}.", notification.Request);
+                    context.Logger.LogInformation(SR.GetResourceString(SR.ID6096), notification.Request);
                 }
             }
 
@@ -141,41 +134,36 @@ namespace OpenIddict.Server
             /// </summary>
             public class ValidateIntrospectionRequest : IOpenIddictServerHandler<ProcessRequestContext>
             {
-                private readonly IOpenIddictServerProvider _provider;
+                private readonly IOpenIddictServerDispatcher _dispatcher;
 
-                public ValidateIntrospectionRequest([NotNull] IOpenIddictServerProvider provider)
-                    => _provider = provider;
+                public ValidateIntrospectionRequest(IOpenIddictServerDispatcher dispatcher)
+                    => _dispatcher = dispatcher;
 
                 /// <summary>
                 /// Gets the default descriptor definition assigned to this handler.
                 /// </summary>
                 public static OpenIddictServerHandlerDescriptor Descriptor { get; }
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessRequestContext>()
+                        .AddFilter<RequireIntrospectionRequest>()
                         .UseScopedHandler<ValidateIntrospectionRequest>()
                         .SetOrder(ExtractIntrospectionRequest.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ProcessRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ProcessRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
-                    if (context.EndpointType != OpenIddictServerEndpointType.Introspection)
-                    {
-                        return;
-                    }
-
                     var notification = new ValidateIntrospectionRequestContext(context.Transaction);
-                    await _provider.DispatchAsync(notification);
+                    await _dispatcher.DispatchAsync(notification);
+
+                    // Store the context object in the transaction so it can be later retrieved by handlers
+                    // that want to access the principal without triggering a new validation process.
+                    context.Transaction.SetProperty(typeof(ValidateIntrospectionRequestContext).FullName!, notification);
 
                     if (notification.IsRequestHandled)
                     {
@@ -198,10 +186,7 @@ namespace OpenIddict.Server
                         return;
                     }
 
-                    // Store the security principal extracted from the introspected token as an environment property.
-                    context.Transaction.Properties[Properties.AmbientPrincipal] = notification.Principal;
-
-                    context.Logger.LogInformation("The introspection request was successfully validated.");
+                    context.Logger.LogInformation(SR.GetResourceString(SR.ID6097));
                 }
             }
 
@@ -210,41 +195,32 @@ namespace OpenIddict.Server
             /// </summary>
             public class HandleIntrospectionRequest : IOpenIddictServerHandler<ProcessRequestContext>
             {
-                private readonly IOpenIddictServerProvider _provider;
+                private readonly IOpenIddictServerDispatcher _dispatcher;
 
-                public HandleIntrospectionRequest([NotNull] IOpenIddictServerProvider provider)
-                    => _provider = provider;
+                public HandleIntrospectionRequest(IOpenIddictServerDispatcher dispatcher)
+                    => _dispatcher = dispatcher;
 
                 /// <summary>
                 /// Gets the default descriptor definition assigned to this handler.
                 /// </summary>
                 public static OpenIddictServerHandlerDescriptor Descriptor { get; }
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessRequestContext>()
+                        .AddFilter<RequireIntrospectionRequest>()
                         .UseScopedHandler<HandleIntrospectionRequest>()
                         .SetOrder(ValidateIntrospectionRequest.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ProcessRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ProcessRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
-                    if (context.EndpointType != OpenIddictServerEndpointType.Introspection)
-                    {
-                        return;
-                    }
-
                     var notification = new HandleIntrospectionRequestContext(context.Transaction);
-                    await _provider.DispatchAsync(notification);
+                    await _dispatcher.DispatchAsync(notification);
 
                     if (notification.IsRequestHandled)
                     {
@@ -270,7 +246,7 @@ namespace OpenIddict.Server
                     var response = new OpenIddictResponse
                     {
                         [Claims.Active] = true,
-                        [Claims.Issuer] = notification.Issuer,
+                        [Claims.Issuer] = notification.Issuer?.AbsoluteUri,
                         [Claims.Username] = notification.Username,
                         [Claims.Subject] = notification.Subject,
                         [Claims.Scope] = string.Join(" ", notification.Scopes),
@@ -280,17 +256,17 @@ namespace OpenIddict.Server
                         [Claims.ClientId] = notification.ClientId
                     };
 
-                    if (notification.IssuedAt != null)
+                    if (notification.IssuedAt is not null)
                     {
                         response[Claims.IssuedAt] = EpochTime.GetIntDate(notification.IssuedAt.Value.UtcDateTime);
                     }
 
-                    if (notification.NotBefore != null)
+                    if (notification.NotBefore is not null)
                     {
                         response[Claims.NotBefore] = EpochTime.GetIntDate(notification.NotBefore.Value.UtcDateTime);
                     }
 
-                    if (notification.ExpiresAt != null)
+                    if (notification.ExpiresAt is not null)
                     {
                         response[Claims.ExpiresAt] = EpochTime.GetIntDate(notification.ExpiresAt.Value.UtcDateTime);
                     }
@@ -304,7 +280,7 @@ namespace OpenIddict.Server
                             break;
 
                         default:
-                            response[Claims.Audience] = new JArray(notification.Audiences);
+                            response[Claims.Audience] = notification.Audiences.ToArray();
                             break;
                     }
 
@@ -313,7 +289,7 @@ namespace OpenIddict.Server
                         response.SetParameter(claim.Key, claim.Value);
                     }
 
-                    context.Response = response;
+                    context.Transaction.Response = response;
                 }
             }
 
@@ -322,41 +298,32 @@ namespace OpenIddict.Server
             /// </summary>
             public class ApplyIntrospectionResponse<TContext> : IOpenIddictServerHandler<TContext> where TContext : BaseRequestContext
             {
-                private readonly IOpenIddictServerProvider _provider;
+                private readonly IOpenIddictServerDispatcher _dispatcher;
 
-                public ApplyIntrospectionResponse([NotNull] IOpenIddictServerProvider provider)
-                    => _provider = provider;
+                public ApplyIntrospectionResponse(IOpenIddictServerDispatcher dispatcher)
+                    => _dispatcher = dispatcher;
 
                 /// <summary>
                 /// Gets the default descriptor definition assigned to this handler.
                 /// </summary>
                 public static OpenIddictServerHandlerDescriptor Descriptor { get; }
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<TContext>()
+                        .AddFilter<RequireIntrospectionRequest>()
                         .UseScopedHandler<ApplyIntrospectionResponse<TContext>>()
                         .SetOrder(int.MaxValue - 100_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] TContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(TContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
-                    if (context.EndpointType != OpenIddictServerEndpointType.Introspection)
-                    {
-                        return;
-                    }
-
                     var notification = new ApplyIntrospectionResponseContext(context.Transaction);
-                    await _provider.DispatchAsync(notification);
+                    await _dispatcher.DispatchAsync(notification);
 
                     if (notification.IsRequestHandled)
                     {
@@ -369,6 +336,8 @@ namespace OpenIddict.Server
                         context.SkipRequest();
                         return;
                     }
+
+                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0047));
                 }
             }
 
@@ -384,18 +353,13 @@ namespace OpenIddict.Server
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ValidateIntrospectionRequestContext>()
                         .UseSingletonHandler<ValidateTokenParameter>()
                         .SetOrder(int.MinValue + 100_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] ValidateIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(ValidateIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
@@ -403,11 +367,12 @@ namespace OpenIddict.Server
                     // Reject introspection requests missing the mandatory token parameter.
                     if (string.IsNullOrEmpty(context.Request.Token))
                     {
-                        context.Logger.LogError("The introspection request was rejected because the token was missing.");
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6098), Parameters.Token);
 
                         context.Reject(
                             error: Errors.InvalidRequest,
-                            description: "The mandatory 'token' parameter is missing.");
+                            description: SR.FormatID2029(Parameters.Token),
+                            uri: SR.FormatID8000(SR.ID2029));
 
                         return default;
                     }
@@ -428,18 +393,13 @@ namespace OpenIddict.Server
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ValidateIntrospectionRequestContext>()
                         .UseSingletonHandler<ValidateClientIdParameter>()
                         .SetOrder(ValidateTokenParameter.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] ValidateIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(ValidateIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
@@ -447,11 +407,12 @@ namespace OpenIddict.Server
                     // At this stage, reject the introspection request unless the client identification requirement was disabled.
                     if (!context.Options.AcceptAnonymousClients && string.IsNullOrEmpty(context.ClientId))
                     {
-                        context.Logger.LogError("The introspection request was rejected because the mandatory 'client_id' was missing.");
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6098), Parameters.ClientId);
 
                         context.Reject(
-                            error: Errors.InvalidRequest,
-                            description: "The mandatory 'client_id' parameter is missing.");
+                            error: Errors.InvalidClient,
+                            description: SR.FormatID2029(Parameters.ClientId),
+                            uri: SR.FormatID8000(SR.ID2029));
 
                         return default;
                     }
@@ -468,15 +429,9 @@ namespace OpenIddict.Server
             {
                 private readonly IOpenIddictApplicationManager _applicationManager;
 
-                public ValidateClientId() => throw new InvalidOperationException(new StringBuilder()
-                    .AppendLine("The core services must be registered when enabling the OpenIddict server feature.")
-                    .Append("To register the OpenIddict core services, reference the 'OpenIddict.Core' package ")
-                    .AppendLine("and call 'services.AddOpenIddict().AddCore()' from 'ConfigureServices'.")
-                    .Append("Alternatively, you can disable the built-in database-based server features by enabling ")
-                    .Append("the degraded mode with 'services.AddOpenIddict().AddServer().EnableDegradedMode()'.")
-                    .ToString());
+                public ValidateClientId() => throw new InvalidOperationException(SR.GetResourceString(SR.ID0016));
 
-                public ValidateClientId([NotNull] IOpenIddictApplicationManager applicationManager)
+                public ValidateClientId(IOpenIddictApplicationManager applicationManager)
                     => _applicationManager = applicationManager;
 
                 /// <summary>
@@ -488,33 +443,105 @@ namespace OpenIddict.Server
                         .AddFilter<RequireDegradedModeDisabled>()
                         .UseScopedHandler<ValidateClientId>()
                         .SetOrder(ValidateClientIdParameter.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ValidateIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ValidateIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
+                    Debug.Assert(!string.IsNullOrEmpty(context.ClientId), SR.FormatID4000(Parameters.ClientId));
+
                     // Retrieve the application details corresponding to the requested client_id.
                     // If no entity can be found, this likely indicates that the client_id is invalid.
                     var application = await _applicationManager.FindByClientIdAsync(context.ClientId);
-                    if (application == null)
+                    if (application is null)
                     {
-                        context.Logger.LogError("The introspection request was rejected because the client " +
-                                                "application was not found: '{ClientId}'.", context.ClientId);
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6099), context.ClientId);
 
                         context.Reject(
                             error: Errors.InvalidClient,
-                            description: "The specified 'client_id' parameter is invalid.");
+                            description: SR.FormatID2052(Parameters.ClientId),
+                            uri: SR.FormatID8000(SR.ID2052));
+
+                        return;
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Contains the logic responsible of rejecting introspection requests made by applications
+            /// whose client type is not compatible with the presence or absence of a client secret.
+            /// Note: this handler is not used when the degraded mode is enabled.
+            /// </summary>
+            public class ValidateClientType : IOpenIddictServerHandler<ValidateIntrospectionRequestContext>
+            {
+                private readonly IOpenIddictApplicationManager _applicationManager;
+
+                public ValidateClientType() => throw new InvalidOperationException(SR.GetResourceString(SR.ID0016));
+
+                public ValidateClientType(IOpenIddictApplicationManager applicationManager)
+                    => _applicationManager = applicationManager;
+
+                /// <summary>
+                /// Gets the default descriptor definition assigned to this handler.
+                /// </summary>
+                public static OpenIddictServerHandlerDescriptor Descriptor { get; }
+                    = OpenIddictServerHandlerDescriptor.CreateBuilder<ValidateIntrospectionRequestContext>()
+                        .AddFilter<RequireClientIdParameter>()
+                        .AddFilter<RequireDegradedModeDisabled>()
+                        .UseScopedHandler<ValidateClientType>()
+                        .SetOrder(ValidateClientId.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
+                        .Build();
+
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ValidateIntrospectionRequestContext context)
+                {
+                    if (context is null)
+                    {
+                        throw new ArgumentNullException(nameof(context));
+                    }
+
+                    Debug.Assert(!string.IsNullOrEmpty(context.ClientId), SR.FormatID4000(Parameters.ClientId));
+
+                    var application = await _applicationManager.FindByClientIdAsync(context.ClientId);
+                    if (application is null)
+                    {
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0032));
+                    }
+
+                    if (await _applicationManager.HasClientTypeAsync(application, ClientTypes.Public))
+                    {
+                        // Reject introspection requests containing a client_secret when the client is a public application.
+                        if (!string.IsNullOrEmpty(context.ClientSecret))
+                        {
+                            context.Logger.LogError(SR.GetResourceString(SR.ID6100), context.ClientId);
+
+                            context.Reject(
+                                error: Errors.InvalidClient,
+                                description: SR.FormatID2053(Parameters.ClientSecret),
+                                uri: SR.FormatID8000(SR.ID2053));
+
+                            return;
+                        }
+
+                        return;
+                    }
+
+                    // Confidential and hybrid applications MUST authenticate to protect them from impersonation attacks.
+                    if (string.IsNullOrEmpty(context.ClientSecret))
+                    {
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6101), context.ClientId);
+
+                        context.Reject(
+                            error: Errors.InvalidClient,
+                            description: SR.FormatID2054(Parameters.ClientSecret),
+                            uri: SR.FormatID8000(SR.ID2054));
 
                         return;
                     }
@@ -529,15 +556,9 @@ namespace OpenIddict.Server
             {
                 private readonly IOpenIddictApplicationManager _applicationManager;
 
-                public ValidateClientSecret() => throw new InvalidOperationException(new StringBuilder()
-                    .AppendLine("The core services must be registered when enabling the OpenIddict server feature.")
-                    .Append("To register the OpenIddict core services, reference the 'OpenIddict.Core' package ")
-                    .AppendLine("and call 'services.AddOpenIddict().AddCore()' from 'ConfigureServices'.")
-                    .Append("Alternatively, you can disable the built-in database-based server features by enabling ")
-                    .Append("the degraded mode with 'services.AddOpenIddict().AddServer().EnableDegradedMode()'.")
-                    .ToString());
+                public ValidateClientSecret() => throw new InvalidOperationException(SR.GetResourceString(SR.ID0016));
 
-                public ValidateClientSecret([NotNull] IOpenIddictApplicationManager applicationManager)
+                public ValidateClientSecret(IOpenIddictApplicationManager applicationManager)
                     => _applicationManager = applicationManager;
 
                 /// <summary>
@@ -548,39 +569,42 @@ namespace OpenIddict.Server
                         .AddFilter<RequireClientIdParameter>()
                         .AddFilter<RequireDegradedModeDisabled>()
                         .UseScopedHandler<ValidateClientSecret>()
-                        .SetOrder(ValidateClientId.Descriptor.Order + 1_000)
+                        .SetOrder(ValidateClientType.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ValidateIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ValidateIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
+                    Debug.Assert(!string.IsNullOrEmpty(context.ClientId), SR.FormatID4000(Parameters.ClientId));
+
                     var application = await _applicationManager.FindByClientIdAsync(context.ClientId);
-                    if (application == null)
+                    if (application is null)
                     {
-                        throw new InvalidOperationException("The client application details cannot be found in the database.");
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0032));
                     }
 
-                    // If the application is not a public client, validate the client secret.
-                    if (!await _applicationManager.IsPublicAsync(application) &&
-                        !await _applicationManager.ValidateClientSecretAsync(application, context.ClientSecret))
+                    // If the application is a public client, don't validate the client secret.
+                    if (await _applicationManager.HasClientTypeAsync(application, ClientTypes.Public))
                     {
-                        context.Logger.LogError("The introspection request was rejected because the confidential or hybrid application " +
-                                                "'{ClientId}' didn't specify valid client credentials.", context.ClientId);
+                        return;
+                    }
+
+                    Debug.Assert(!string.IsNullOrEmpty(context.ClientSecret), SR.FormatID4000(Parameters.ClientSecret));
+
+                    if (!await _applicationManager.ValidateClientSecretAsync(application, context.ClientSecret))
+                    {
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6102), context.ClientId);
 
                         context.Reject(
                             error: Errors.InvalidClient,
-                            description: "The specified client credentials are invalid.");
+                            description: SR.GetResourceString(SR.ID2055),
+                            uri: SR.FormatID8000(SR.ID2055));
 
                         return;
                     }
@@ -596,15 +620,9 @@ namespace OpenIddict.Server
             {
                 private readonly IOpenIddictApplicationManager _applicationManager;
 
-                public ValidateEndpointPermissions() => throw new InvalidOperationException(new StringBuilder()
-                    .AppendLine("The core services must be registered when enabling the OpenIddict server feature.")
-                    .Append("To register the OpenIddict core services, reference the 'OpenIddict.Core' package ")
-                    .AppendLine("and call 'services.AddOpenIddict().AddCore()' from 'ConfigureServices'.")
-                    .Append("Alternatively, you can disable the built-in database-based server features by enabling ")
-                    .Append("the degraded mode with 'services.AddOpenIddict().AddServer().EnableDegradedMode()'.")
-                    .ToString());
+                public ValidateEndpointPermissions() => throw new InvalidOperationException(SR.GetResourceString(SR.ID0016));
 
-                public ValidateEndpointPermissions([NotNull] IOpenIddictApplicationManager applicationManager)
+                public ValidateEndpointPermissions(IOpenIddictApplicationManager applicationManager)
                     => _applicationManager = applicationManager;
 
                 /// <summary>
@@ -617,37 +635,34 @@ namespace OpenIddict.Server
                         .AddFilter<RequireEndpointPermissionsEnabled>()
                         .UseScopedHandler<ValidateEndpointPermissions>()
                         .SetOrder(ValidateClientSecret.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ValidateIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ValidateIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
+                    Debug.Assert(!string.IsNullOrEmpty(context.ClientId), SR.FormatID4000(Parameters.ClientId));
+
                     var application = await _applicationManager.FindByClientIdAsync(context.ClientId);
-                    if (application == null)
+                    if (application is null)
                     {
-                        throw new InvalidOperationException("The client application details cannot be found in the database.");
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0032));
                     }
 
                     // Reject the request if the application is not allowed to use the introspection endpoint.
                     if (!await _applicationManager.HasPermissionAsync(application, Permissions.Endpoints.Introspection))
                     {
-                        context.Logger.LogError("The introspection request was rejected because the application '{ClientId}' " +
-                                                "was not allowed to use the introspection endpoint.", context.ClientId);
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6103), context.ClientId);
 
                         context.Reject(
                             error: Errors.UnauthorizedClient,
-                            description: "This client application is not allowed to use the introspection endpoint.");
+                            description: SR.GetResourceString(SR.ID2075),
+                            uri: SR.FormatID8000(SR.ID2075));
 
                         return;
                     }
@@ -655,14 +670,14 @@ namespace OpenIddict.Server
             }
 
             /// <summary>
-            /// Contains the logic responsible of rejecting introspection requests that specify an invalid token.
+            /// Contains the logic responsible of rejecting introspection requests that don't specify a valid token.
             /// </summary>
             public class ValidateToken : IOpenIddictServerHandler<ValidateIntrospectionRequestContext>
             {
-                private readonly IOpenIddictServerProvider _provider;
+                private readonly IOpenIddictServerDispatcher _dispatcher;
 
-                public ValidateToken([NotNull] IOpenIddictServerProvider provider)
-                    => _provider = provider;
+                public ValidateToken(IOpenIddictServerDispatcher dispatcher)
+                    => _dispatcher = dispatcher;
 
                 /// <summary>
                 /// Gets the default descriptor definition assigned to this handler.
@@ -670,138 +685,86 @@ namespace OpenIddict.Server
                 public static OpenIddictServerHandlerDescriptor Descriptor { get; }
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ValidateIntrospectionRequestContext>()
                         .UseScopedHandler<ValidateToken>()
-                        // This handler is deliberately registered with a high order to ensure it runs
-                        // after custom handlers registered with the default order and prevent the token
-                        // endpoint from disclosing whether the introspected token is valid before
-                        // the caller's identity can first be fully verified by the other handlers.
-                        .SetOrder(100_000)
+                        .SetOrder(ValidateEndpointPermissions.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ValidateIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ValidateIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
-                    // Note: use the "token_type_hint" parameter specified by the client application
-                    // to try to determine the type of the token sent by the client application.
-                    // See https://tools.ietf.org/html/rfc7662#section-2.1 for more information.
-                    var principal = context.Request.TokenTypeHint switch
+                    var notification = new ProcessAuthenticationContext(context.Transaction);
+                    await _dispatcher.DispatchAsync(notification);
+
+                    if (notification.IsRequestHandled)
                     {
-                        TokenTypeHints.AccessToken       => await DeserializeAccessTokenAsync(),
-                        TokenTypeHints.AuthorizationCode => await DeserializeAuthorizationCodeAsync(),
-                        TokenTypeHints.IdToken           => await DeserializeIdentityTokenAsync(),
-                        TokenTypeHints.RefreshToken      => await DeserializeRefreshTokenAsync(),
-
-                        _ => null
-                    };
-
-                    // Note: if the introspected token can't be found using "token_type_hint",
-                    // the search must be extended to all supported token types.
-                    // See https://tools.ietf.org/html/rfc7662#section-2.1 for more information.
-                    // To avoid calling the same deserialization methods twice, an additional check
-                    // is made to exclude the corresponding call when a token_type_hint was specified.
-                    principal ??= context.Request.TokenTypeHint switch
-                    {
-                        TokenTypeHints.AccessToken       => await DeserializeAuthorizationCodeAsync() ??
-                                                            await DeserializeIdentityTokenAsync() ??
-                                                            await DeserializeRefreshTokenAsync(),
-
-                        TokenTypeHints.AuthorizationCode => await DeserializeAccessTokenAsync() ??
-                                                            await DeserializeIdentityTokenAsync() ??
-                                                            await DeserializeRefreshTokenAsync(),
-
-                        TokenTypeHints.IdToken           => await DeserializeAccessTokenAsync() ??
-                                                            await DeserializeAuthorizationCodeAsync() ??
-                                                            await DeserializeRefreshTokenAsync(),
-
-                        TokenTypeHints.RefreshToken      => await DeserializeAccessTokenAsync() ??
-                                                            await DeserializeAuthorizationCodeAsync() ??
-                                                            await DeserializeIdentityTokenAsync(),
-
-                        _                                => await DeserializeAccessTokenAsync() ??
-                                                            await DeserializeAuthorizationCodeAsync() ??
-                                                            await DeserializeIdentityTokenAsync() ??
-                                                            await DeserializeRefreshTokenAsync()
-                    };
-
-                    if (principal == null)
-                    {
-                        context.Logger.LogError("The introspection request was rejected because the token was invalid.");
-
-                        context.Reject(
-                            error: Errors.InvalidToken,
-                            description: "The specified token is invalid.");
-
+                        context.HandleRequest();
                         return;
                     }
 
-                    var date = principal.GetExpirationDate();
-                    if (date.HasValue && date.Value < DateTimeOffset.UtcNow)
+                    else if (notification.IsRequestSkipped)
                     {
-                        context.Logger.LogError("The introspection request was rejected because the token was expired.");
-
-                        context.Reject(
-                            error: Errors.InvalidToken,
-                            description: "The specified token is no longer valid.");
-
+                        context.SkipRequest();
                         return;
                     }
 
-                    // Attach the principal extracted from the token to the parent event context.
-                    context.Principal = principal;
-
-                    async ValueTask<ClaimsPrincipal> DeserializeAccessTokenAsync()
+                    else if (notification.IsRejected)
                     {
-                        var notification = new DeserializeAccessTokenContext(context.Transaction)
-                        {
-                            Token = context.Request.Token
-                        };
-
-                        await _provider.DispatchAsync(notification);
-                        return notification.Principal;
+                        context.Reject(
+                            error: notification.Error ?? Errors.InvalidRequest,
+                            description: notification.ErrorDescription,
+                            uri: notification.ErrorUri);
+                        return;
                     }
 
-                    async ValueTask<ClaimsPrincipal> DeserializeAuthorizationCodeAsync()
-                    {
-                        var notification = new DeserializeAuthorizationCodeContext(context.Transaction)
-                        {
-                            Token = context.Request.Token
-                        };
+                    // Attach the security principal extracted from the token to the validation context.
+                    context.Principal = notification.Principal;
+                }
+            }
 
-                        await _provider.DispatchAsync(notification);
-                        return notification.Principal;
+            /// <summary>
+            /// Contains the logic responsible of rejecting introspection requests that specify an unsupported token.
+            /// </summary>
+            public class ValidateTokenType : IOpenIddictServerHandler<ValidateIntrospectionRequestContext>
+            {
+                /// <summary>
+                /// Gets the default descriptor definition assigned to this handler.
+                /// </summary>
+                public static OpenIddictServerHandlerDescriptor Descriptor { get; }
+                    = OpenIddictServerHandlerDescriptor.CreateBuilder<ValidateIntrospectionRequestContext>()
+                        .UseSingletonHandler<ValidateTokenType>()
+                        .SetOrder(ValidateToken.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
+                        .Build();
+
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(ValidateIntrospectionRequestContext context)
+                {
+                    if (context is null)
+                    {
+                        throw new ArgumentNullException(nameof(context));
                     }
 
-                    async ValueTask<ClaimsPrincipal> DeserializeIdentityTokenAsync()
-                    {
-                        var notification = new DeserializeIdentityTokenContext(context.Transaction)
-                        {
-                            Token = context.Request.Token
-                        };
+                    Debug.Assert(context.Principal is { Identity: ClaimsIdentity }, SR.GetResourceString(SR.ID4006));
 
-                        await _provider.DispatchAsync(notification);
-                        return notification.Principal;
+                    if (!context.Principal.HasTokenType(TokenTypeHints.AccessToken) &&
+                        !context.Principal.HasTokenType(TokenTypeHints.RefreshToken))
+                    {
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6104));
+
+                        context.Reject(
+                            error: Errors.UnsupportedTokenType,
+                            description: SR.GetResourceString(SR.ID2076),
+                            uri: SR.FormatID8000(SR.ID2076));
+
+                        return default;
                     }
 
-                    async ValueTask<ClaimsPrincipal> DeserializeRefreshTokenAsync()
-                    {
-                        var notification = new DeserializeRefreshTokenContext(context.Transaction)
-                        {
-                            Token = context.Request.Token
-                        };
-
-                        await _provider.DispatchAsync(notification);
-                        return notification.Principal;
-                    }
+                    return default;
                 }
             }
 
@@ -821,78 +784,35 @@ namespace OpenIddict.Server
                         // In this case, the returned claims are limited by AttachApplicationClaims to limit exposure.
                         .AddFilter<RequireClientIdParameter>()
                         .UseSingletonHandler<ValidateAuthorizedParty>()
-                        .SetOrder(ValidateToken.Descriptor.Order + 1_000)
+                        .SetOrder(ValidateTokenType.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] ValidateIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(ValidateIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
-                    // When the introspected token is an authorization code, the caller must be
-                    // listed as a presenter (i.e the party the authorization code was issued to).
-                    if (context.Principal.IsAuthorizationCode())
-                    {
-                        if (!context.Principal.HasPresenter())
-                        {
-                            throw new InvalidOperationException("The presenters list cannot be extracted from the authorization code.");
-                        }
-
-                        if (!context.Principal.HasPresenter(context.ClientId))
-                        {
-                            context.Logger.LogError("The introspection request was rejected because the " +
-                                                    "authorization code was issued to a different client.");
-
-                            context.Reject(
-                                error: Errors.InvalidToken,
-                                description: "The client application is not allowed to introspect the specified token.");
-
-                            return default;
-                        }
-
-                        return default;
-                    }
+                    Debug.Assert(!string.IsNullOrEmpty(context.ClientId), SR.FormatID4000(Parameters.ClientId));
+                    Debug.Assert(context.Principal is { Identity: ClaimsIdentity }, SR.GetResourceString(SR.ID4006));
 
                     // When the introspected token is an access token, the caller must be listed either as a presenter
                     // (i.e the party the token was issued to) or as an audience (i.e a resource server/API).
                     // If the access token doesn't contain any explicit presenter/audience, the token is assumed
                     // to be not specific to any resource server/client application and the check is bypassed.
-                    if (context.Principal.IsAccessToken() &&
-                        context.Principal.HasAudience() && !context.Principal.HasAudience(context.ClientId) &&
-                        context.Principal.HasPresenter() && !context.Principal.HasPresenter(context.ClientId))
+                    if (context.Principal.HasTokenType(TokenTypeHints.AccessToken) &&
+                        context.Principal.HasClaim(Claims.Private.Audience) && !context.Principal.HasAudience(context.ClientId) &&
+                        context.Principal.HasClaim(Claims.Private.Presenter) && !context.Principal.HasPresenter(context.ClientId))
                     {
-                        context.Logger.LogError("The introspection request was rejected because the access token " +
-                                                "was issued to a different client or for another resource server.");
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6106));
 
                         context.Reject(
                             error: Errors.InvalidToken,
-                            description: "The client application is not allowed to introspect the specified token.");
-
-                        return default;
-                    }
-
-                    // When the introspected token is an identity token, the caller must be listed as an audience
-                    // (i.e the client application the identity token was initially issued to).
-                    // If the identity token doesn't contain any explicit audience, the token is
-                    // assumed to be not specific to any client application and the check is bypassed.
-                    if (context.Principal.IsIdentityToken() && context.Principal.HasAudience() &&
-                                                              !context.Principal.HasAudience(context.ClientId))
-                    {
-                        context.Logger.LogError("The introspection request was rejected because the " +
-                                                "identity token was issued to a different client.");
-
-                        context.Reject(
-                            error: Errors.InvalidToken,
-                            description: "The client application is not allowed to introspect the specified token.");
+                            description: SR.GetResourceString(SR.ID2077),
+                            uri: SR.FormatID8000(SR.ID2077));
 
                         return default;
                     }
@@ -901,15 +821,15 @@ namespace OpenIddict.Server
                     // listed as a presenter (i.e the party the token was issued to).
                     // If the refresh token doesn't contain any explicit presenter, the token is
                     // assumed to be not specific to any client application and the check is bypassed.
-                    if (context.Principal.IsRefreshToken() && context.Principal.HasPresenter() &&
-                                                             !context.Principal.HasPresenter(context.ClientId))
+                    if (context.Principal.HasTokenType(TokenTypeHints.RefreshToken) &&
+                        context.Principal.HasClaim(Claims.Private.Presenter) && !context.Principal.HasPresenter(context.ClientId))
                     {
-                        context.Logger.LogError("The introspection request was rejected because the " +
-                                                "refresh token was issued to a different client.");
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6108));
 
                         context.Reject(
                             error: Errors.InvalidToken,
-                            description: "The client application is not allowed to introspect the specified token.");
+                            description: SR.GetResourceString(SR.ID2077),
+                            uri: SR.FormatID8000(SR.ID2077));
 
                         return default;
                     }
@@ -931,26 +851,22 @@ namespace OpenIddict.Server
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<HandleIntrospectionRequestContext>()
                         .UseSingletonHandler<AttachPrincipal>()
                         .SetOrder(int.MinValue + 100_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] HandleIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(HandleIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
-                    if (context.Transaction.Properties.TryGetValue(Properties.AmbientPrincipal, out var principal))
-                    {
-                        context.Principal ??= (ClaimsPrincipal) principal;
-                    }
+                    var notification = context.Transaction.GetProperty<ValidateIntrospectionRequestContext>(
+                        typeof(ValidateIntrospectionRequestContext).FullName!) ??
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0007));
+
+                    context.Principal ??= notification.Principal;
 
                     return default;
                 }
@@ -968,40 +884,35 @@ namespace OpenIddict.Server
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<HandleIntrospectionRequestContext>()
                         .UseSingletonHandler<AttachMetadataClaims>()
                         .SetOrder(AttachPrincipal.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] HandleIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(HandleIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
-                    context.Issuer = context.Options.Issuer?.AbsoluteUri;
-                    context.TokenId = context.Principal.GetTokenId();
-                    context.TokenUsage = context.Principal.GetTokenUsage();
+                    Debug.Assert(context.Principal is { Identity: ClaimsIdentity }, SR.GetResourceString(SR.ID4006));
+
+                    context.TokenId = context.Principal.GetClaim(Claims.JwtId);
+                    context.TokenUsage = context.Principal.GetTokenType();
                     context.Subject = context.Principal.GetClaim(Claims.Subject);
 
                     context.IssuedAt = context.NotBefore = context.Principal.GetCreationDate();
                     context.ExpiresAt = context.Principal.GetExpirationDate();
 
-                    // Infer the audiences/client_id claims from the properties stored in the security principal.
-                    // Note: the client_id claim must be a unique string so multiple presenters cannot be returned.
-                    // To work around this limitation, only the first one is returned if multiple values are listed.
+                    // Infer the audiences/client_id from the claims stored in the security principal.
                     context.Audiences.UnionWith(context.Principal.GetAudiences());
-                    context.ClientId = context.Principal.GetPresenters().FirstOrDefault();
+                    context.ClientId = context.Principal.GetClaim(Claims.ClientId) ??
+                                       context.Principal.GetPresenters().FirstOrDefault();
 
                     // Note: only set "token_type" when the received token is an access token.
                     // See https://tools.ietf.org/html/rfc7662#section-2.2
                     // and https://tools.ietf.org/html/rfc6749#section-5.1 for more information.
-                    if (context.Principal.IsAccessToken())
+                    if (context.Principal.HasTokenType(TokenTypeHints.AccessToken))
                     {
                         context.TokenType = TokenTypes.Bearer;
                     }
@@ -1012,20 +923,15 @@ namespace OpenIddict.Server
 
             /// <summary>
             /// Contains the logic responsible of attaching the application-specific claims extracted from the token the event context.
+            /// Note: this handler is not used when the degraded mode is enabled.
             /// </summary>
             public class AttachApplicationClaims : IOpenIddictServerHandler<HandleIntrospectionRequestContext>
             {
                 private readonly IOpenIddictApplicationManager _applicationManager;
 
-                public AttachApplicationClaims() => throw new InvalidOperationException(new StringBuilder()
-                    .AppendLine("The core services must be registered when enabling the OpenIddict server feature.")
-                    .Append("To register the OpenIddict core services, reference the 'OpenIddict.Core' package ")
-                    .AppendLine("and call 'services.AddOpenIddict().AddCore()' from 'ConfigureServices'.")
-                    .Append("Alternatively, you can disable the built-in database-based server features by enabling ")
-                    .Append("the degraded mode with 'services.AddOpenIddict().AddServer().EnableDegradedMode()'.")
-                    .ToString());
+                public AttachApplicationClaims() => throw new InvalidOperationException(SR.GetResourceString(SR.ID0016));
 
-                public AttachApplicationClaims([NotNull] IOpenIddictApplicationManager applicationManager)
+                public AttachApplicationClaims(IOpenIddictApplicationManager applicationManager)
                     => _applicationManager = applicationManager;
 
                 /// <summary>
@@ -1037,68 +943,62 @@ namespace OpenIddict.Server
                         .AddFilter<RequireDegradedModeDisabled>()
                         .UseScopedHandler<AttachApplicationClaims>()
                         .SetOrder(AttachMetadataClaims.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] HandleIntrospectionRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(HandleIntrospectionRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
-                    // Don't return application-specific claims if the token is not an access or identity token.
-                    if (!context.Principal.IsAccessToken() && !context.Principal.IsIdentityToken())
+                    Debug.Assert(!string.IsNullOrEmpty(context.Request.ClientId), SR.FormatID4000(Parameters.ClientId));
+                    Debug.Assert(context.Principal is { Identity: ClaimsIdentity }, SR.GetResourceString(SR.ID4006));
+
+                    // Don't return application-specific claims if the token is not an access token.
+                    if (!context.Principal.HasTokenType(TokenTypeHints.AccessToken))
                     {
                         return;
                     }
 
-                    // Only the specified audience (i.e the resource server for an access token
-                    // and the client application for an identity token) can access the sensitive
-                    // application-specific claims contained in the introspected access/identity token.
+                    // Only specified audiences (that were explicitly defined as allowed resources) can access
+                    // the sensitive application-specific claims contained in the introspected access token.
                     if (!context.Principal.HasAudience(context.Request.ClientId))
                     {
+                        context.Logger.LogInformation(SR.GetResourceString(SR.ID6105), context.Request.ClientId);
+
                         return;
                     }
 
                     var application = await _applicationManager.FindByClientIdAsync(context.Request.ClientId);
-                    if (application == null)
+                    if (application is null)
                     {
-                        throw new InvalidOperationException("The client application details cannot be found in the database.");
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0032));
                     }
 
                     // Public clients are not allowed to access sensitive claims as authentication cannot be enforced.
-                    if (await _applicationManager.IsPublicAsync(application))
+                    if (await _applicationManager.HasClientTypeAsync(application, ClientTypes.Public))
                     {
+                        context.Logger.LogInformation(SR.GetResourceString(SR.ID6107), context.Request.ClientId);
+
                         return;
                     }
 
                     context.Username = context.Principal.Identity.Name;
                     context.Scopes.UnionWith(context.Principal.GetScopes());
 
-                    foreach (var grouping in context.Principal.Claims.GroupBy(claim => claim.Type))
+                    foreach (var group in context.Principal.Claims.GroupBy(claim => claim.Type))
                     {
                         // Exclude standard claims, that are already handled via strongly-typed properties.
                         // Make sure to always update this list when adding new built-in claim properties.
-                        var type = grouping.Key;
-                        switch (type)
+                        var type = group.Key;
+                        if (type is Claims.Audience or Claims.ExpiresAt or Claims.IssuedAt or
+                                    Claims.Issuer   or Claims.NotBefore or Claims.Scope or
+                                    Claims.Subject  or Claims.TokenType or Claims.TokenUsage)
                         {
-                            case Claims.Audience:
-                            case Claims.ExpiresAt:
-                            case Claims.IssuedAt:
-                            case Claims.Issuer:
-                            case Claims.NotBefore:
-                            case Claims.Scope:
-                            case Claims.Subject:
-                            case Claims.TokenType:
-                            case Claims.TokenUsage:
-                                continue;
+                            continue;
                         }
 
                         // Exclude OpenIddict-specific metadata claims, that are always considered private.
@@ -1107,8 +1007,8 @@ namespace OpenIddict.Server
                             continue;
                         }
 
-                        var claims = grouping.ToArray();
-                        context.Claims[type] = claims.Length switch
+                        var claims = group.ToList();
+                        context.Claims[type] = claims.Count switch
                         {
                             // When there's only one claim with the same type, directly
                             // convert the claim using the specified claim value type.
@@ -1116,7 +1016,7 @@ namespace OpenIddict.Server
 
                             // When multiple claims share the same type, retrieve the underlying
                             // JSON values and add everything to a new unique JSON array.
-                            _ => new JArray(claims.Select(claim => ConvertToParameter(claim).Value))
+                            _ => DeserializeElement(SerializeClaims(claims))
                         };
                     }
 
@@ -1124,15 +1024,71 @@ namespace OpenIddict.Server
                     {
                         ClaimValueTypes.Boolean => bool.Parse(claim.Value),
 
-                        ClaimValueTypes.Integer   => int.Parse(claim.Value, CultureInfo.InvariantCulture),
-                        ClaimValueTypes.Integer32 => int.Parse(claim.Value, CultureInfo.InvariantCulture),
+                        ClaimValueTypes.Integer or ClaimValueTypes.Integer32
+                            => int.Parse(claim.Value, CultureInfo.InvariantCulture),
+
                         ClaimValueTypes.Integer64 => long.Parse(claim.Value, CultureInfo.InvariantCulture),
 
-                        JsonClaimValueTypes.Json      => JToken.Parse(claim.Value),
-                        JsonClaimValueTypes.JsonArray => JToken.Parse(claim.Value),
-                        
+                        JsonClaimValueTypes.Json or JsonClaimValueTypes.JsonArray => DeserializeElement(claim.Value),
+
                         _ => new OpenIddictParameter(claim.Value)
                     };
+
+                    static JsonElement DeserializeElement(string value)
+                    {
+                        using var document = JsonDocument.Parse(value);
+                        return document.RootElement.Clone();
+                    }
+
+                    static string SerializeClaims(IReadOnlyList<Claim> claims)
+                    {
+                        using var stream = new MemoryStream();
+                        using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
+                        {
+                            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                            Indented = false
+                        });
+
+                        writer.WriteStartArray();
+
+                        for (var index = 0; index < claims.Count; index++)
+                        {
+                            var claim = claims[index];
+
+                            switch (claim.ValueType)
+                            {
+                                case ClaimValueTypes.Boolean:
+                                    writer.WriteBooleanValue(bool.Parse(claim.Value));
+                                    break;
+
+                                case ClaimValueTypes.Integer:
+                                case ClaimValueTypes.Integer32:
+                                    writer.WriteNumberValue(int.Parse(claim.Value, CultureInfo.InvariantCulture));
+                                    break;
+
+                                case ClaimValueTypes.Integer64:
+                                    writer.WriteNumberValue(long.Parse(claim.Value, CultureInfo.InvariantCulture));
+                                    break;
+
+                                case JsonClaimValueTypes.Json:
+                                case JsonClaimValueTypes.JsonArray:
+                                    using (var document = JsonDocument.Parse(claim.Value))
+                                    {
+                                        document.WriteTo(writer);
+                                    }
+                                    break;
+
+                                default:
+                                    writer.WriteStringValue(claim.Value);
+                                    break;
+                            }
+                        }
+
+                        writer.WriteEndArray();
+                        writer.Flush();
+
+                        return Encoding.UTF8.GetString(stream.ToArray());
+                    }
                 }
             }
 
@@ -1148,18 +1104,13 @@ namespace OpenIddict.Server
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyIntrospectionResponseContext>()
                         .UseSingletonHandler<NormalizeErrorResponse>()
                         .SetOrder(int.MinValue + 100_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] ApplyIntrospectionResponseContext context)
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(ApplyIntrospectionResponseContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }

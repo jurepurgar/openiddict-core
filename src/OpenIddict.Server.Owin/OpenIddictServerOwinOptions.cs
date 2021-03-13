@@ -71,19 +71,46 @@ namespace OpenIddict.Server.Owin
         public bool EnableUserinfoEndpointPassthrough { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether request caching should be enabled.
-        /// When enabled, both authorization and logout requests are automatically stored
+        /// Gets or sets a boolean indicating whether the pass-through mode is enabled for the user verification endpoint.
+        /// When the pass-through mode is used, OpenID Connect requests are initially handled by OpenIddict.
+        /// Once validated, the rest of the request processing pipeline is invoked, so that OpenID Connect requests
+        /// can be handled at a later stage (in a custom middleware or in a MVC controller, for instance).
+        /// </summary>
+        public bool EnableVerificationEndpointPassthrough { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether requests received by the authorization endpoint
+        /// should be cached. When enabled, authorization requests are automatically stored
         /// in the distributed cache, which allows flowing large payloads across requests.
         /// Enabling this option is recommended when using external authentication providers
         /// or when large GET or POST OpenID Connect authorization requests support is required.
         /// </summary>
-        public bool EnableRequestCaching { get; set; }
+        public bool EnableAuthorizationRequestCaching { get; set; }
 
         /// <summary>
-        /// Gets or sets the caching policy used to determine how long the authorization
-        /// and end session requests should be cached by the distributed cache implementation.
+        /// Gets or sets a boolean indicating whether requests received by the logout endpoint should be cached.
+        /// When enabled, authorization requests are automatically stored in the distributed cache.
         /// </summary>
-        public DistributedCacheEntryOptions RequestCachingPolicy { get; set; } = new DistributedCacheEntryOptions
+        public bool EnableLogoutRequestCaching { get; set; }
+
+        /// <summary>
+        /// Gets or sets the optional "realm" value returned to the caller as part of the WWW-Authenticate header.
+        /// </summary>
+        public string? Realm { get; set; }
+
+        /// <summary>
+        /// Gets or sets the caching policy used by the authorization endpoint.
+        /// </summary>
+        public DistributedCacheEntryOptions AuthorizationRequestCachingPolicy { get; set; } = new()
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
+            SlidingExpiration = TimeSpan.FromMinutes(30)
+        };
+
+        /// <summary>
+        /// Gets or sets the caching policy used by the logout endpoint.
+        /// </summary>
+        public DistributedCacheEntryOptions LogoutRequestCachingPolicy { get; set; } = new()
         {
             AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1),
             SlidingExpiration = TimeSpan.FromMinutes(30)

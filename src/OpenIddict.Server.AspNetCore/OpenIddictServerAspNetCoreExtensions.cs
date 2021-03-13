@@ -6,7 +6,6 @@
 
 using System;
 using System.Linq;
-using JetBrains.Annotations;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -28,9 +27,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
         /// <remarks>This extension can be safely called multiple times.</remarks>
         /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
-        public static OpenIddictServerAspNetCoreBuilder UseAspNetCore([NotNull] this OpenIddictServerBuilder builder)
+        public static OpenIddictServerAspNetCoreBuilder UseAspNetCore(this OpenIddictServerBuilder builder)
         {
-            if (builder == null)
+            if (builder is null)
             {
                 throw new ArgumentNullException(nameof(builder));
             }
@@ -44,15 +43,17 @@ namespace Microsoft.Extensions.DependencyInjection
             builder.Services.TryAdd(DefaultHandlers.Select(descriptor => descriptor.ServiceDescriptor));
 
             // Register the built-in filters used by the default OpenIddict ASP.NET Core server event handlers.
+            builder.Services.TryAddSingleton<RequireAuthorizationRequestCachingEnabled>();
             builder.Services.TryAddSingleton<RequireAuthorizationEndpointPassthroughEnabled>();
             builder.Services.TryAddSingleton<RequireErrorPassthroughEnabled>();
             builder.Services.TryAddSingleton<RequireHttpRequest>();
+            builder.Services.TryAddSingleton<RequireLogoutRequestCachingEnabled>();
             builder.Services.TryAddSingleton<RequireLogoutEndpointPassthroughEnabled>();
             builder.Services.TryAddSingleton<RequireTransportSecurityRequirementEnabled>();
-            builder.Services.TryAddSingleton<RequireRequestCachingEnabled>();
             builder.Services.TryAddSingleton<RequireStatusCodePagesIntegrationEnabled>();
             builder.Services.TryAddSingleton<RequireTokenEndpointPassthroughEnabled>();
             builder.Services.TryAddSingleton<RequireUserinfoEndpointPassthroughEnabled>();
+            builder.Services.TryAddSingleton<RequireVerificationEndpointPassthroughEnabled>();
 
             // Register the option initializer used by the OpenIddict ASP.NET Core server integration services.
             // Note: TryAddEnumerable() is used here to ensure the initializers are only registered once.
@@ -61,7 +62,9 @@ namespace Microsoft.Extensions.DependencyInjection
                 ServiceDescriptor.Singleton<IConfigureOptions<AuthenticationOptions>, OpenIddictServerAspNetCoreConfiguration>(),
                 ServiceDescriptor.Singleton<IPostConfigureOptions<AuthenticationOptions>, OpenIddictServerAspNetCoreConfiguration>(),
 
-                ServiceDescriptor.Singleton<IConfigureOptions<OpenIddictServerOptions>, OpenIddictServerAspNetCoreConfiguration>()
+                ServiceDescriptor.Singleton<IConfigureOptions<OpenIddictServerOptions>, OpenIddictServerAspNetCoreConfiguration>(),
+
+                ServiceDescriptor.Singleton<IPostConfigureOptions<OpenIddictServerAspNetCoreOptions>, OpenIddictServerAspNetCoreConfiguration>()
             });
 
             return new OpenIddictServerAspNetCoreBuilder(builder.Services);
@@ -75,15 +78,14 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <remarks>This extension can be safely called multiple times.</remarks>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public static OpenIddictServerBuilder UseAspNetCore(
-            [NotNull] this OpenIddictServerBuilder builder,
-            [NotNull] Action<OpenIddictServerAspNetCoreBuilder> configuration)
+            this OpenIddictServerBuilder builder, Action<OpenIddictServerAspNetCoreBuilder> configuration)
         {
-            if (builder == null)
+            if (builder is null)
             {
                 throw new ArgumentNullException(nameof(builder));
             }
 
-            if (configuration == null)
+            if (configuration is null)
             {
                 throw new ArgumentNullException(nameof(configuration));
             }

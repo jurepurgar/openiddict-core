@@ -6,15 +6,16 @@
 
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
-using JetBrains.Annotations;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Primitives;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using SR = OpenIddict.Abstractions.OpenIddictResources;
 
 namespace OpenIddict.Abstractions
 {
@@ -33,21 +34,56 @@ namespace OpenIddict.Abstractions
         /// <summary>
         /// Initializes a new OpenIddict message.
         /// </summary>
-        public OpenIddictMessage() { }
+        public OpenIddictMessage()
+        {
+        }
 
         /// <summary>
         /// Initializes a new OpenIddict message.
         /// </summary>
         /// <param name="parameters">The message parameters.</param>
-        public OpenIddictMessage([NotNull] IEnumerable<KeyValuePair<string, JToken>> parameters)
+        /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
+        public OpenIddictMessage(JsonElement parameters)
         {
-            if (parameters == null)
+            if (parameters.ValueKind != JsonValueKind.Object)
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0189), nameof(parameters));
+            }
+
+            foreach (var parameter in parameters.EnumerateObject())
+            {
+                // Ignore parameters whose name is null or empty.
+                if (string.IsNullOrEmpty(parameter.Name))
+                {
+                    continue;
+                }
+
+                // While generally discouraged, JSON objects can contain multiple properties with
+                // the same name. In this case, the last occurrence replaces the previous ones.
+                if (HasParameter(parameter.Name))
+                {
+                    RemoveParameter(parameter.Name);
+                }
+
+                AddParameter(parameter.Name, parameter.Value);
+            }
+        }
+
+        /// <summary>
+        /// Initializes a new OpenIddict message.
+        /// </summary>
+        /// <param name="parameters">The message parameters.</param>
+        /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
+        public OpenIddictMessage(IEnumerable<KeyValuePair<string, OpenIddictParameter>> parameters)
+        {
+            if (parameters is null)
             {
                 throw new ArgumentNullException(nameof(parameters));
             }
 
             foreach (var parameter in parameters)
             {
+                // Ignore parameters whose name is null or empty.
                 if (string.IsNullOrEmpty(parameter.Key))
                 {
                     continue;
@@ -61,74 +97,33 @@ namespace OpenIddict.Abstractions
         /// Initializes a new OpenIddict message.
         /// </summary>
         /// <param name="parameters">The message parameters.</param>
-        public OpenIddictMessage([NotNull] IEnumerable<KeyValuePair<string, OpenIddictParameter>> parameters)
+        /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
+        public OpenIddictMessage(IEnumerable<KeyValuePair<string, string?>> parameters)
         {
-            if (parameters == null)
+            if (parameters is null)
             {
                 throw new ArgumentNullException(nameof(parameters));
             }
 
-            foreach (var parameter in parameters)
+            foreach (var parameter in parameters.GroupBy(parameter => parameter.Key))
             {
+                // Ignore parameters whose name is null or empty.
                 if (string.IsNullOrEmpty(parameter.Key))
                 {
                     continue;
                 }
 
-                AddParameter(parameter.Key, parameter.Value);
-            }
-        }
-
-        /// <summary>
-        /// Initializes a new OpenIddict message.
-        /// </summary>
-        /// <param name="parameters">The message parameters.</param>
-        public OpenIddictMessage([NotNull] IEnumerable<KeyValuePair<string, string>> parameters)
-        {
-            if (parameters == null)
-            {
-                throw new ArgumentNullException(nameof(parameters));
-            }
-
-            foreach (var parameter in parameters)
-            {
-                if (string.IsNullOrEmpty(parameter.Key))
-                {
-                    continue;
-                }
-
-                AddParameter(parameter.Key, parameter.Value);
-            }
-        }
-
-        /// <summary>
-        /// Initializes a new OpenIddict message.
-        /// </summary>
-        /// <param name="parameters">The message parameters.</param>
-        public OpenIddictMessage([NotNull] IEnumerable<KeyValuePair<string, string[]>> parameters)
-        {
-            if (parameters == null)
-            {
-                throw new ArgumentNullException(nameof(parameters));
-            }
-
-            foreach (var parameter in parameters)
-            {
-                if (string.IsNullOrEmpty(parameter.Key))
-                {
-                    continue;
-                }
+                var values = parameter.Select(parameter => parameter.Value).ToArray();
 
                 // Note: the core OAuth 2.0 specification requires that request parameters
                 // not be present more than once but derived specifications like the
-                // token exchange RFC deliberately allow specifying multiple resource
+                // token exchange specification deliberately allow specifying multiple
                 // parameters with the same name to represent a multi-valued parameter.
-                AddParameter(parameter.Key, parameter.Value?.Length switch
+                AddParameter(parameter.Key, values.Length switch
                 {
-                    null => default,
-                    0    => default,
-                    1    => new OpenIddictParameter(parameter.Value[0]),
-                    _    => new OpenIddictParameter(parameter.Value)
+                    0 => default,
+                    1 => values[0],
+                    _ => values
                 });
             }
         }
@@ -137,15 +132,17 @@ namespace OpenIddict.Abstractions
         /// Initializes a new OpenIddict message.
         /// </summary>
         /// <param name="parameters">The message parameters.</param>
-        public OpenIddictMessage([NotNull] IEnumerable<KeyValuePair<string, StringValues>> parameters)
+        /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
+        public OpenIddictMessage(IEnumerable<KeyValuePair<string, string?[]?>> parameters)
         {
-            if (parameters == null)
+            if (parameters is null)
             {
                 throw new ArgumentNullException(nameof(parameters));
             }
 
             foreach (var parameter in parameters)
             {
+                // Ignore parameters whose name is null or empty.
                 if (string.IsNullOrEmpty(parameter.Key))
                 {
                     continue;
@@ -153,13 +150,46 @@ namespace OpenIddict.Abstractions
 
                 // Note: the core OAuth 2.0 specification requires that request parameters
                 // not be present more than once but derived specifications like the
-                // token exchange RFC deliberately allow specifying multiple resource
+                // token exchange specification deliberately allow specifying multiple
+                // parameters with the same name to represent a multi-valued parameter.
+                AddParameter(parameter.Key, parameter.Value?.Length switch
+                {
+                    null or 0 => default,
+                    1         => parameter.Value[0],
+                    _         => parameter.Value
+                });
+            }
+        }
+
+        /// <summary>
+        /// Initializes a new OpenIddict message.
+        /// </summary>
+        /// <param name="parameters">The message parameters.</param>
+        /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
+        public OpenIddictMessage(IEnumerable<KeyValuePair<string, StringValues>> parameters)
+        {
+            if (parameters is null)
+            {
+                throw new ArgumentNullException(nameof(parameters));
+            }
+
+            foreach (var parameter in parameters)
+            {
+                // Ignore parameters whose name is null or empty.
+                if (string.IsNullOrEmpty(parameter.Key))
+                {
+                    continue;
+                }
+
+                // Note: the core OAuth 2.0 specification requires that request parameters
+                // not be present more than once but derived specifications like the
+                // token exchange specification deliberately allow specifying multiple
                 // parameters with the same name to represent a multi-valued parameter.
                 AddParameter(parameter.Key, parameter.Value.Count switch
                 {
                     0 => default,
-                    1 => new OpenIddictParameter(parameter.Value[0]),
-                    _ => new OpenIddictParameter(parameter.Value.ToArray())
+                    1 => parameter.Value[0],
+                    _ => parameter.Value.ToArray()
                 });
             }
         }
@@ -187,22 +217,24 @@ namespace OpenIddict.Abstractions
             = new Dictionary<string, OpenIddictParameter>(StringComparer.Ordinal);
 
         /// <summary>
-        /// Adds a parameter.
+        /// Adds a parameter. Note: an exception is thrown if a parameter with the same name was already added.
         /// </summary>
         /// <param name="name">The parameter name.</param>
         /// <param name="value">The parameter value.</param>
         /// <returns>The current instance, which allows chaining calls.</returns>
-        public OpenIddictMessage AddParameter([NotNull] string name, OpenIddictParameter value)
+        public OpenIddictMessage AddParameter(string name, OpenIddictParameter value)
         {
             if (string.IsNullOrEmpty(name))
             {
-                throw new ArgumentException("The parameter name cannot be null or empty.", nameof(name));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0190), nameof(name));
             }
 
-            if (!Parameters.ContainsKey(name))
+            if (Parameters.ContainsKey(name))
             {
-                Parameters.Add(name, value);
+                throw new ArgumentException(SR.GetResourceString(SR.ID0191), nameof(name));
             }
+
+            Parameters.Add(name, value);
 
             return this;
         }
@@ -212,11 +244,11 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="name">The parameter name.</param>
         /// <returns>The parameter value, or <c>null</c> if it cannot be found.</returns>
-        public OpenIddictParameter? GetParameter([NotNull] string name)
+        public OpenIddictParameter? GetParameter(string name)
         {
             if (string.IsNullOrEmpty(name))
             {
-                throw new ArgumentException("The parameter name cannot be null or empty.", nameof(name));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0190), nameof(name));
             }
 
             if (Parameters.TryGetValue(name, out OpenIddictParameter value))
@@ -231,19 +263,19 @@ namespace OpenIddict.Abstractions
         /// Gets all the parameters associated with this instance.
         /// </summary>
         /// <returns>The parameters associated with this instance.</returns>
-        public ImmutableDictionary<string, OpenIddictParameter> GetParameters()
-            => Parameters.ToImmutableDictionary(StringComparer.Ordinal);
+        public IReadOnlyDictionary<string, OpenIddictParameter> GetParameters()
+            => new ReadOnlyDictionary<string, OpenIddictParameter>(Parameters);
 
         /// <summary>
         /// Determines whether the current message contains the specified parameter.
         /// </summary>
         /// <param name="name">The parameter name.</param>
         /// <returns><c>true</c> if the parameter is present, <c>false</c> otherwise.</returns>
-        public bool HasParameter([NotNull] string name)
+        public bool HasParameter(string name)
         {
             if (string.IsNullOrEmpty(name))
             {
-                throw new ArgumentException("The parameter name cannot be null or empty.", nameof(name));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0190), nameof(name));
             }
 
             return Parameters.ContainsKey(name);
@@ -254,11 +286,11 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="name">The parameter name.</param>
         /// <returns>The current instance, which allows chaining calls.</returns>
-        public OpenIddictMessage RemoveParameter([NotNull] string name)
+        public OpenIddictMessage RemoveParameter(string name)
         {
             if (string.IsNullOrEmpty(name))
             {
-                throw new ArgumentException("The parameter name cannot be null or empty.", nameof(name));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0190), nameof(name));
             }
 
             Parameters.Remove(name);
@@ -273,16 +305,15 @@ namespace OpenIddict.Abstractions
         /// <param name="name">The parameter name.</param>
         /// <param name="value">The parameter value.</param>
         /// <returns>The current instance, which allows chaining calls.</returns>
-        public OpenIddictMessage SetParameter([NotNull] string name, [CanBeNull] OpenIddictParameter? value)
+        public OpenIddictMessage SetParameter(string name, OpenIddictParameter? value)
         {
             if (string.IsNullOrEmpty(name))
             {
-                throw new ArgumentException("The parameter name cannot be null or empty.", nameof(name));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0190), nameof(name));
             }
 
-            // If the parameter value is null or empty,
-            // remove the corresponding entry from the collection.
-            if (value == null || OpenIddictParameter.IsNullOrEmpty(value.GetValueOrDefault()))
+            // If the parameter value is null or empty, remove the corresponding entry from the collection.
+            if (value is null || OpenIddictParameter.IsNullOrEmpty(value.GetValueOrDefault()))
             {
                 Parameters.Remove(name);
             }
@@ -296,59 +327,87 @@ namespace OpenIddict.Abstractions
         }
 
         /// <summary>
+        /// Tries to get the value corresponding to a given parameter.
+        /// </summary>
+        /// <param name="name">The parameter name.</param>
+        /// <param name="value">The parameter value.</param>
+        /// <returns><c>true</c> if the parameter could be found, <c>false</c> otherwise.</returns>
+        public bool TryGetParameter(string name, out OpenIddictParameter value)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0190), nameof(name));
+            }
+
+            return Parameters.TryGetValue(name, out value);
+        }
+
+        /// <summary>
         /// Returns a <see cref="string"/> representation of the current instance that can be used in logs.
         /// Note: sensitive parameters like client secrets are automatically removed for security reasons.
         /// </summary>
         /// <returns>The indented JSON representation corresponding to this message.</returns>
         public override string ToString()
         {
-            var builder = new StringBuilder();
-
-            using (var writer = new JsonTextWriter(new StringWriter(builder, CultureInfo.InvariantCulture)))
+            using var stream = new MemoryStream();
+            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
             {
-                writer.Formatting = Formatting.Indented;
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                Indented = true
+            });
 
-                writer.WriteStartObject();
+            writer.WriteStartObject();
 
-                foreach (var parameter in Parameters)
+            foreach (var parameter in Parameters)
+            {
+                writer.WritePropertyName(parameter.Key);
+
+                // Remove sensitive parameters from the generated payload.
+                switch (parameter.Key)
                 {
-                    writer.WritePropertyName(parameter.Key);
-
-                    // Remove sensitive parameters from the generated payload.
-                    switch (parameter.Key)
-                    {
-                        case OpenIddictConstants.Parameters.AccessToken:
-                        case OpenIddictConstants.Parameters.Assertion:
-                        case OpenIddictConstants.Parameters.ClientAssertion:
-                        case OpenIddictConstants.Parameters.ClientSecret:
-                        case OpenIddictConstants.Parameters.Code:
-                        case OpenIddictConstants.Parameters.IdToken:
-                        case OpenIddictConstants.Parameters.IdTokenHint:
-                        case OpenIddictConstants.Parameters.Password:
-                        case OpenIddictConstants.Parameters.RefreshToken:
-                        case OpenIddictConstants.Parameters.Token:
-                        {
-                            writer.WriteValue("[removed for security reasons]");
-
-                            continue;
-                        }
-                    }
-
-                    var token = (JToken) parameter.Value;
-                    if (token == null)
-                    {
-                        writer.WriteNull();
-
+                    case OpenIddictConstants.Parameters.AccessToken:
+                    case OpenIddictConstants.Parameters.Assertion:
+                    case OpenIddictConstants.Parameters.ClientAssertion:
+                    case OpenIddictConstants.Parameters.ClientSecret:
+                    case OpenIddictConstants.Parameters.Code:
+                    case OpenIddictConstants.Parameters.IdToken:
+                    case OpenIddictConstants.Parameters.IdTokenHint:
+                    case OpenIddictConstants.Parameters.Password:
+                    case OpenIddictConstants.Parameters.RefreshToken:
+                    case OpenIddictConstants.Parameters.Token:
+                        writer.WriteStringValue("[redacted]");
                         continue;
-                    }
-
-                    token.WriteTo(writer);
                 }
 
-                writer.WriteEndObject();
+                parameter.Value.WriteTo(writer);
             }
 
-            return builder.ToString();
+            writer.WriteEndObject();
+            writer.Flush();
+
+            return Encoding.UTF8.GetString(stream.ToArray());
+        }
+
+        /// <summary>
+        /// Writes the message to the specified JSON writer.
+        /// </summary>
+        /// <param name="writer">The UTF-8 JSON writer.</param>
+        public void WriteTo(Utf8JsonWriter writer)
+        {
+            if (writer is null)
+            {
+                throw new ArgumentNullException(nameof(writer));
+            }
+
+            writer.WriteStartObject();
+
+            foreach (var parameter in Parameters)
+            {
+                writer.WritePropertyName(parameter.Key);
+                parameter.Value.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
         }
     }
 }

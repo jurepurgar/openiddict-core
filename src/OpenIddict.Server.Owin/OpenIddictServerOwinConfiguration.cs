@@ -5,50 +5,39 @@
  */
 
 using System;
-using System.Diagnostics;
-using System.Text;
-using JetBrains.Annotations;
 using Microsoft.Extensions.Options;
 using Microsoft.Owin.Security;
+using SR = OpenIddict.Abstractions.OpenIddictResources;
 
 namespace OpenIddict.Server.Owin
 {
     /// <summary>
     /// Contains the methods required to ensure that the OpenIddict server configuration is valid.
     /// </summary>
-    public class OpenIddictServerOwinConfiguration : IConfigureNamedOptions<OpenIddictServerOptions>,
+    public class OpenIddictServerOwinConfiguration : IConfigureOptions<OpenIddictServerOptions>,
                                                      IPostConfigureOptions<OpenIddictServerOwinOptions>
     {
-        public void Configure([NotNull] OpenIddictServerOptions options)
-            => Debug.Fail("This infrastructure method shouldn't be called");
-
-        public void Configure([CanBeNull] string name, [NotNull] OpenIddictServerOptions options)
+        public void Configure(OpenIddictServerOptions options)
         {
-            if (options == null)
+            if (options is null)
             {
                 throw new ArgumentNullException(nameof(options));
             }
 
             // Register the built-in event handlers used by the OpenIddict OWIN server components.
-            foreach (var handler in OpenIddictServerOwinHandlers.DefaultHandlers)
-            {
-                options.DefaultHandlers.Add(handler);
-            }
+            options.Handlers.AddRange(OpenIddictServerOwinHandlers.DefaultHandlers);
         }
 
-        public void PostConfigure([CanBeNull] string name, [NotNull] OpenIddictServerOwinOptions options)
+        public void PostConfigure(string name, OpenIddictServerOwinOptions options)
         {
-            if (options == null)
+            if (options is null)
             {
                 throw new ArgumentNullException(nameof(options));
             }
 
             if (options.AuthenticationMode == AuthenticationMode.Active)
             {
-                throw new InvalidOperationException(new StringBuilder()
-                    .AppendLine("The OpenIddict OWIN server handler cannot be used as an active authentication handler.")
-                    .Append("Make sure that 'OpenIddictServerOwinOptions.AuthenticationMode' is not set to 'Active'.")
-                    .ToString());
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0119));
             }
         }
     }

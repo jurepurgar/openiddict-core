@@ -6,11 +6,11 @@
 
 using System;
 using System.ComponentModel;
-using JetBrains.Annotations;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using OpenIddict.Server.AspNetCore;
+using SR = OpenIddict.Abstractions.OpenIddictResources;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
@@ -24,7 +24,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// Initializes a new instance of <see cref="OpenIddictServerAspNetCoreBuilder"/>.
         /// </summary>
         /// <param name="services">The services collection.</param>
-        public OpenIddictServerAspNetCoreBuilder([NotNull] IServiceCollection services)
+        public OpenIddictServerAspNetCoreBuilder(IServiceCollection services)
             => Services = services ?? throw new ArgumentNullException(nameof(services));
 
         /// <summary>
@@ -39,9 +39,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="configuration">The delegate used to configure the OpenIddict options.</param>
         /// <remarks>This extension can be safely called multiple times.</remarks>
         /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
-        public OpenIddictServerAspNetCoreBuilder Configure([NotNull] Action<OpenIddictServerAspNetCoreOptions> configuration)
+        public OpenIddictServerAspNetCoreBuilder Configure(Action<OpenIddictServerAspNetCoreOptions> configuration)
         {
-            if (configuration == null)
+            if (configuration is null)
             {
                 throw new ArgumentNullException(nameof(configuration));
             }
@@ -52,7 +52,7 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Disables the transport security requirement (HTTPS) during development.
+        /// Disables the transport security requirement (HTTPS).
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
         public OpenIddictServerAspNetCoreBuilder DisableTransportSecurityRequirement()
@@ -72,8 +72,11 @@ namespace Microsoft.Extensions.DependencyInjection
         /// Enables error pass-through support, so that the rest of the request processing pipeline is
         /// automatically invoked when returning an error from the interactive authorization and logout endpoints.
         /// When this option is enabled, special logic must be added to these actions to handle errors, that can be
-        /// retrieved using <see cref="OpenIddictServerAspNetCoreHelpers.GetOpenIddictServerResponse(HttpContext)"/>
+        /// retrieved using <see cref="OpenIddictServerAspNetCoreHelpers.GetOpenIddictServerResponse(HttpContext)"/>.
         /// </summary>
+        /// <remarks>
+        /// Important: the error pass-through mode cannot be used when the status code pages integration is enabled.
+        /// </remarks>
         /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
         [EditorBrowsable(EditorBrowsableState.Advanced)]
         public OpenIddictServerAspNetCoreBuilder EnableErrorPassthrough()
@@ -110,61 +113,99 @@ namespace Microsoft.Extensions.DependencyInjection
             => Configure(options => options.EnableUserinfoEndpointPassthrough = true);
 
         /// <summary>
-        /// Enables request caching, so that both authorization and logout requests
+        /// Enables the pass-through mode for the OpenID Connect user verification endpoint.
+        /// When the pass-through mode is used, OpenID Connect requests are initially handled by OpenIddict.
+        /// Once validated, the rest of the request processing pipeline is invoked, so that OpenID Connect requests
+        /// can be handled at a later stage (in a custom middleware or in a MVC controller, for instance).
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
+        public OpenIddictServerAspNetCoreBuilder EnableVerificationEndpointPassthrough()
+            => Configure(options => options.EnableVerificationEndpointPassthrough = true);
+
+        /// <summary>
+        /// Enables authorization request caching, so that authorization requests
         /// are automatically stored in the distributed cache, which allows flowing
         /// large payloads across requests. Enabling this option is recommended
         /// when using external authentication providers or when large GET or POST
         /// OpenID Connect authorization requests support is required.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
-        public OpenIddictServerAspNetCoreBuilder EnableRequestCaching()
-            => Configure(options => options.EnableRequestCaching = true);
+        public OpenIddictServerAspNetCoreBuilder EnableAuthorizationRequestCaching()
+            => Configure(options => options.EnableAuthorizationRequestCaching = true);
 
         /// <summary>
-        /// Enables status code pages integration support. Once enabled, errors generated
-        /// by the interactive authorization and logout endpoints can be handled by ASP.NET Core.
+        /// Enables logout request caching, so that logout requests
+        /// are automatically stored in the distributed cache.
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
+        public OpenIddictServerAspNetCoreBuilder EnableLogoutRequestCaching()
+            => Configure(options => options.EnableLogoutRequestCaching = true);
+
+        /// <summary>
+        /// Enables status code pages integration support. Once enabled, errors
+        /// generated by the interactive endpoints can be handled by ASP.NET Core.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
         public OpenIddictServerAspNetCoreBuilder EnableStatusCodePagesIntegration()
             => Configure(options => options.EnableStatusCodePagesIntegration = true);
 
         /// <summary>
-        /// Sets the caching policy used to determine how long the authorization and
-        /// end session requests should be cached by the distributed cache implementation.
-        /// Note: the specified policy is only used when request caching is explicitly enabled.
+        /// Sets the realm returned to the caller as part of the WWW-Authenticate header.
         /// </summary>
-        /// <param name="policy">The request caching policy.</param>
+        /// <param name="realm">The issuer address.</param>
         /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
-        public OpenIddictServerAspNetCoreBuilder SetRequestCachingPolicy([NotNull] DistributedCacheEntryOptions policy)
+        public OpenIddictServerAspNetCoreBuilder SetRealm(string realm)
         {
-            if (policy == null)
+            if (string.IsNullOrEmpty(realm))
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0107), nameof(realm));
+            }
+
+            return Configure(options => options.Realm = realm);
+        }
+
+        /// <summary>
+        /// Sets the caching policy used by the authorization endpoint.
+        /// Note: the specified policy is only used when caching is explicitly enabled.
+        /// </summary>
+        /// <param name="policy">The caching policy.</param>
+        /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
+        public OpenIddictServerAspNetCoreBuilder SetAuthorizationRequestCachingPolicy(DistributedCacheEntryOptions policy)
+        {
+            if (policy is null)
             {
                 throw new ArgumentNullException(nameof(policy));
             }
 
-            return Configure(options => options.RequestCachingPolicy = policy);
+            return Configure(options => options.AuthorizationRequestCachingPolicy = policy);
         }
 
         /// <summary>
-        /// Determines whether the specified object is equal to the current object.
+        /// Sets the caching policy used by the logout endpoint.
+        /// Note: the specified policy is only used when caching is explicitly enabled.
         /// </summary>
-        /// <param name="obj">The object to compare with the current object.</param>
-        /// <returns><c>true</c> if the specified object is equal to the current object; otherwise, false.</returns>
-        [EditorBrowsable(EditorBrowsableState.Never)]
-        public override bool Equals([CanBeNull] object obj) => base.Equals(obj);
+        /// <param name="policy">The caching policy.</param>
+        /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
+        public OpenIddictServerAspNetCoreBuilder SetLogoutRequestCachingPolicy(DistributedCacheEntryOptions policy)
+        {
+            if (policy is null)
+            {
+                throw new ArgumentNullException(nameof(policy));
+            }
 
-        /// <summary>
-        /// Serves as the default hash function.
-        /// </summary>
-        /// <returns>A hash code for the current object.</returns>
+            return Configure(options => options.LogoutRequestCachingPolicy = policy);
+        }
+
+        /// <inheritdoc/>
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public override bool Equals(object? obj) => base.Equals(obj);
+
+        /// <inheritdoc/>
         [EditorBrowsable(EditorBrowsableState.Never)]
         public override int GetHashCode() => base.GetHashCode();
 
-        /// <summary>
-        /// Returns a string that represents the current object.
-        /// </summary>
-        /// <returns>A string that represents the current object.</returns>
+        /// <inheritdoc/>
         [EditorBrowsable(EditorBrowsableState.Never)]
-        public override string ToString() => base.ToString();
+        public override string? ToString() => base.ToString();
     }
 }

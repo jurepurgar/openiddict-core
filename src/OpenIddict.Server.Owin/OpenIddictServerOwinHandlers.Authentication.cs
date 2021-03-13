@@ -5,27 +5,30 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Threading.Tasks;
-using JetBrains.Annotations;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Owin.Infrastructure;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Bson;
-using Newtonsoft.Json.Linq;
-using OpenIddict.Abstractions;
 using Owin;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Server.OpenIddictServerEvents;
 using static OpenIddict.Server.Owin.OpenIddictServerOwinConstants;
 using static OpenIddict.Server.Owin.OpenIddictServerOwinHandlerFilters;
+using JsonWebTokenTypes = OpenIddict.Server.Owin.OpenIddictServerOwinConstants.JsonWebTokenTypes;
+using SR = OpenIddict.Abstractions.OpenIddictResources;
 
 namespace OpenIddict.Server.Owin
 {
@@ -44,17 +47,19 @@ namespace OpenIddict.Server.Owin
                 /*
                  * Authorization request handling:
                  */
-                EnablePassthroughMode.Descriptor,
+                EnablePassthroughMode<HandleAuthorizationRequestContext, RequireAuthorizationEndpointPassthroughEnabled>.Descriptor,
 
                 /*
                  * Authorization response processing:
                  */
                 RemoveCachedRequest.Descriptor,
+                AttachHttpResponseCode<ApplyAuthorizationResponseContext>.Descriptor,
+                AttachCacheControlHeader<ApplyAuthorizationResponseContext>.Descriptor,
                 ProcessFormPostResponse.Descriptor,
                 ProcessQueryResponse.Descriptor,
                 ProcessFragmentResponse.Descriptor,
-                ProcessPassthroughErrorResponse.Descriptor,
-                ProcessLocalErrorResponse.Descriptor);
+                ProcessPassthroughErrorResponse<ApplyAuthorizationResponseContext, RequireAuthorizationEndpointPassthroughEnabled>.Descriptor,
+                ProcessLocalErrorResponse<ApplyAuthorizationResponseContext>.Descriptor);
 
             /// <summary>
             /// Contains the logic responsible of restoring cached requests from the request_id, if specified.
@@ -64,14 +69,9 @@ namespace OpenIddict.Server.Owin
             {
                 private readonly IDistributedCache _cache;
 
-                public RestoreCachedRequestParameters() => throw new InvalidOperationException(new StringBuilder()
-                    .AppendLine("A distributed cache instance must be registered when enabling request caching.")
-                    .Append("To register the default in-memory distributed cache implementation, reference the ")
-                    .Append("'Microsoft.Extensions.Caching.Memory' package and call ")
-                    .Append("'services.AddDistributedMemoryCache()' from 'ConfigureServices'.")
-                    .ToString());
+                public RestoreCachedRequestParameters() => throw new InvalidOperationException(SR.GetResourceString(SR.ID0116));
 
-                public RestoreCachedRequestParameters([NotNull] IDistributedCache cache)
+                public RestoreCachedRequestParameters(IDistributedCache cache)
                     => _cache = cache;
 
                 /// <summary>
@@ -80,24 +80,21 @@ namespace OpenIddict.Server.Owin
                 public static OpenIddictServerHandlerDescriptor Descriptor { get; }
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ExtractAuthorizationRequestContext>()
                         .AddFilter<RequireOwinRequest>()
-                        .AddFilter<RequireRequestCachingEnabled>()
+                        .AddFilter<RequireAuthorizationRequestCachingEnabled>()
                         .UseSingletonHandler<RestoreCachedRequestParameters>()
                         .SetOrder(ExtractGetOrPostRequest<ExtractAuthorizationRequestContext>.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ExtractAuthorizationRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ExtractAuthorizationRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
+
+                    Debug.Assert(context.Request is not null, SR.GetResourceString(SR.ID4008));
 
                     // If a request_id parameter can be found in the authorization request,
                     // restore the complete authorization request from the distributed cache.
@@ -109,30 +106,54 @@ namespace OpenIddict.Server.Owin
 
                     // Note: the cache key is always prefixed with a specific marker
                     // to avoid collisions with the other types of cached payloads.
-                    var payload = await _cache.GetAsync(Cache.AuthorizationRequest + context.Request.RequestId);
-                    if (payload == null)
+                    var token = await _cache.GetStringAsync(Cache.AuthorizationRequest + context.Request.RequestId);
+                    if (token is null || !context.Options.JsonWebTokenHandler.CanReadToken(token))
                     {
-                        context.Logger.LogError("The authorization request was rejected because an unknown " +
-                                                "or invalid request_id parameter was specified.");
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6146), Parameters.RequestId);
 
                         context.Reject(
                             error: Errors.InvalidRequest,
-                            description: "The specified 'request_id' parameter is invalid.");
+                            description: SR.FormatID2052(Parameters.RequestId),
+                            uri: SR.FormatID8000(SR.ID2052));
 
                         return;
                     }
 
+                    var parameters = context.Options.TokenValidationParameters.Clone();
+                    parameters.ValidIssuer ??= context.Issuer?.AbsoluteUri;
+                    parameters.ValidAudience = context.Issuer?.AbsoluteUri;
+                    parameters.ValidTypes = new[] { JsonWebTokenTypes.Private.AuthorizationRequest };
+
+                    var result = context.Options.JsonWebTokenHandler.ValidateToken(token, parameters);
+                    if (!result.IsValid)
+                    {
+                        context.Logger.LogError(SR.GetResourceString(SR.ID6146), Parameters.RequestId);
+
+                        context.Reject(
+                            error: Errors.InvalidRequest,
+                            description: SR.FormatID2052(Parameters.RequestId),
+                            uri: SR.FormatID8000(SR.ID2052));
+
+                        return;
+                    }
+
+                    using var document = JsonDocument.Parse(
+                        Base64UrlEncoder.Decode(((JsonWebToken) result.SecurityToken).InnerToken.EncodedPayload));
+                    if (document.RootElement.ValueKind != JsonValueKind.Object)
+                    {
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0117));
+                    }
+
                     // Restore the authorization request parameters from the serialized payload.
-                    using var reader = new BsonDataReader(new MemoryStream(payload));
-                    foreach (var parameter in JObject.Load(reader))
+                    foreach (var parameter in document.RootElement.EnumerateObject())
                     {
                         // Avoid overriding the current request parameters.
-                        if (context.Request.HasParameter(parameter.Key))
+                        if (context.Request.HasParameter(parameter.Name))
                         {
                             continue;
                         }
 
-                        context.Request.SetParameter(parameter.Key, parameter.Value);
+                        context.Request.SetParameter(parameter.Name, parameter.Value.Clone());
                     }
                 }
             }
@@ -146,16 +167,11 @@ namespace OpenIddict.Server.Owin
                 private readonly IDistributedCache _cache;
                 private readonly IOptionsMonitor<OpenIddictServerOwinOptions> _options;
 
-                public CacheRequestParameters() => throw new InvalidOperationException(new StringBuilder()
-                    .AppendLine("A distributed cache instance must be registered when enabling request caching.")
-                    .Append("To register the default in-memory distributed cache implementation, reference the ")
-                    .Append("'Microsoft.Extensions.Caching.Memory' package and call ")
-                    .Append("'services.AddDistributedMemoryCache()' from 'ConfigureServices'.")
-                    .ToString());
+                public CacheRequestParameters() => throw new InvalidOperationException(SR.GetResourceString(SR.ID0116));
 
                 public CacheRequestParameters(
-                    [NotNull] IDistributedCache cache,
-                    [NotNull] IOptionsMonitor<OpenIddictServerOwinOptions> options)
+                    IDistributedCache cache,
+                    IOptionsMonitor<OpenIddictServerOwinOptions> options)
                 {
                     _cache = cache;
                     _options = options;
@@ -167,31 +183,28 @@ namespace OpenIddict.Server.Owin
                 public static OpenIddictServerHandlerDescriptor Descriptor { get; }
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ExtractAuthorizationRequestContext>()
                         .AddFilter<RequireOwinRequest>()
-                        .AddFilter<RequireRequestCachingEnabled>()
+                        .AddFilter<RequireAuthorizationRequestCachingEnabled>()
                         .UseSingletonHandler<CacheRequestParameters>()
                         .SetOrder(RestoreCachedRequestParameters.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ExtractAuthorizationRequestContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ExtractAuthorizationRequestContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
 
+                    Debug.Assert(context.Request is not null, SR.GetResourceString(SR.ID4008));
+
                     // This handler only applies to OWIN requests. If The OWIN request cannot be resolved,
                     // this may indicate that the request was incorrectly processed by another server stack.
                     var request = context.Transaction.GetOwinRequest();
-                    if (request == null)
+                    if (request is null)
                     {
-                        throw new InvalidOperationException("The OWIN request cannot be resolved.");
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0120));
                     }
 
                     // Don't cache the request if the request doesn't include any parameter.
@@ -210,19 +223,23 @@ namespace OpenIddict.Server.Owin
                     context.Request.RequestId = Base64UrlEncoder.Encode(data);
 
                     // Store the serialized authorization request parameters in the distributed cache.
-                    var stream = new MemoryStream();
-                    using (var writer = new BsonDataWriter(stream))
+                    var token = context.Options.JsonWebTokenHandler.CreateToken(new SecurityTokenDescriptor
                     {
-                        writer.CloseOutput = false;
-
-                        var serializer = JsonSerializer.CreateDefault();
-                        serializer.Serialize(writer, context.Request);
-                    }
+                        Audience = context.Issuer?.AbsoluteUri,
+                        Claims = context.Request.GetParameters().ToDictionary(
+                            parameter => parameter.Key,
+                            parameter => parameter.Value.Value),
+                        EncryptingCredentials = context.Options.EncryptionCredentials.First(),
+                        Issuer = context.Issuer?.AbsoluteUri,
+                        SigningCredentials = context.Options.SigningCredentials.First(),
+                        Subject = new ClaimsIdentity(),
+                        TokenType = JsonWebTokenTypes.Private.AuthorizationRequest
+                    });
 
                     // Note: the cache key is always prefixed with a specific marker
                     // to avoid collisions with the other types of cached payloads.
-                    await _cache.SetAsync(Cache.AuthorizationRequest + context.Request.RequestId,
-                        stream.ToArray(), _options.CurrentValue.RequestCachingPolicy);
+                    await _cache.SetStringAsync(Cache.AuthorizationRequest + context.Request.RequestId,
+                        token, _options.CurrentValue.AuthorizationRequestCachingPolicy);
 
                     // Create a new GET authorization request containing only the request_id parameter.
                     var address = WebUtilities.AddQueryString(
@@ -238,42 +255,6 @@ namespace OpenIddict.Server.Owin
             }
 
             /// <summary>
-            /// Contains the logic responsible of enabling the pass-through mode for the received request.
-            /// Note: this handler is not used when the OpenID Connect request is not initially handled by OWIN.
-            /// </summary>
-            public class EnablePassthroughMode : IOpenIddictServerHandler<HandleAuthorizationRequestContext>
-            {
-                /// <summary>
-                /// Gets the default descriptor definition assigned to this handler.
-                /// </summary>
-                public static OpenIddictServerHandlerDescriptor Descriptor { get; }
-                    = OpenIddictServerHandlerDescriptor.CreateBuilder<HandleAuthorizationRequestContext>()
-                        .AddFilter<RequireAuthorizationEndpointPassthroughEnabled>()
-                        .UseSingletonHandler<EnablePassthroughMode>()
-                        .SetOrder(int.MaxValue - 100_000)
-                        .Build();
-
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] HandleAuthorizationRequestContext context)
-                {
-                    if (context == null)
-                    {
-                        throw new ArgumentNullException(nameof(context));
-                    }
-
-                    context.SkipRequest();
-
-                    return default;
-                }
-            }
-
-            /// <summary>
             /// Contains the logic responsible of removing cached authorization requests from the distributed cache.
             /// Note: this handler is not used when the OpenID Connect request is not initially handled by OWIN.
             /// </summary>
@@ -281,14 +262,9 @@ namespace OpenIddict.Server.Owin
             {
                 private readonly IDistributedCache _cache;
 
-                public RemoveCachedRequest() => throw new InvalidOperationException(new StringBuilder()
-                    .AppendLine("A distributed cache instance must be registered when enabling request caching.")
-                    .Append("To register the default in-memory distributed cache implementation, reference the ")
-                    .Append("'Microsoft.Extensions.Caching.Memory' package and call ")
-                    .Append("'services.AddDistributedMemoryCache()' from 'ConfigureServices'.")
-                    .ToString());
+                public RemoveCachedRequest() => throw new InvalidOperationException(SR.GetResourceString(SR.ID0116));
 
-                public RemoveCachedRequest([NotNull] IDistributedCache cache)
+                public RemoveCachedRequest(IDistributedCache cache)
                     => _cache = cache;
 
                 /// <summary>
@@ -297,21 +273,16 @@ namespace OpenIddict.Server.Owin
                 public static OpenIddictServerHandlerDescriptor Descriptor { get; }
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyAuthorizationResponseContext>()
                         .AddFilter<RequireOwinRequest>()
-                        .AddFilter<RequireRequestCachingEnabled>()
+                        .AddFilter<RequireAuthorizationRequestCachingEnabled>()
                         .UseSingletonHandler<RemoveCachedRequest>()
-                        .SetOrder(ProcessFormPostResponse.Descriptor.Order - 1_000)
+                        .SetOrder(int.MinValue + 100_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] ApplyAuthorizationResponseContext context)
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(ApplyAuthorizationResponseContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
@@ -339,7 +310,7 @@ namespace OpenIddict.Server.Owin
             {
                 private readonly HtmlEncoder _encoder;
 
-                public ProcessFormPostResponse([NotNull] HtmlEncoder encoder)
+                public ProcessFormPostResponse(HtmlEncoder encoder)
                     => _encoder = encoder;
 
                 /// <summary>
@@ -349,19 +320,14 @@ namespace OpenIddict.Server.Owin
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyAuthorizationResponseContext>()
                         .AddFilter<RequireOwinRequest>()
                         .UseSingletonHandler<ProcessFormPostResponse>()
-                        .SetOrder(ProcessQueryResponse.Descriptor.Order - 1_000)
+                        .SetOrder(50_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ApplyAuthorizationResponseContext context)
+                /// <inheritdoc/>
+                public async ValueTask HandleAsync(ApplyAuthorizationResponseContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
@@ -369,9 +335,9 @@ namespace OpenIddict.Server.Owin
                     // This handler only applies to OWIN requests. If The OWIN request cannot be resolved,
                     // this may indicate that the request was incorrectly processed by another server stack.
                     var response = context.Transaction.GetOwinRequest()?.Context.Response;
-                    if (response == null)
+                    if (response is null)
                     {
-                        throw new InvalidOperationException("The OWIN request cannot be resolved.");
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0120));
                     }
 
                     if (string.IsNullOrEmpty(context.RedirectUri) ||
@@ -380,9 +346,7 @@ namespace OpenIddict.Server.Owin
                         return;
                     }
 
-                    context.Logger.LogInformation("The authorization response was successfully returned to " +
-                                                  "'{RedirectUri}' using the form post response mode: {Response}.",
-                                                  context.RedirectUri, context.Response);
+                    context.Logger.LogInformation(SR.GetResourceString(SR.ID6147), context.RedirectUri, context.Response);
 
                     using (var buffer = new MemoryStream())
                     using (var writer = new StreamWriter(buffer))
@@ -400,12 +364,15 @@ namespace OpenIddict.Server.Owin
                         // Note: while initially not allowed by the core OAuth 2.0 specification, multiple parameters
                         // with the same name are used by derived drafts like the OAuth 2.0 token exchange specification.
                         // For consistency, multiple parameters with the same name are also supported by this endpoint.
-                        foreach (var parameter in context.Response.GetFlattenedParameters())
+                        foreach (var (key, value) in
+                            from parameter in context.Response.GetParameters()
+                            let values = (string?[]?) parameter.Value
+                            where values is not null
+                            from value in values
+                            where !string.IsNullOrEmpty(value)
+                            select (parameter.Key, Value: value))
                         {
-                            var key = _encoder.Encode(parameter.Key);
-                            var value = _encoder.Encode(parameter.Value);
-
-                            writer.WriteLine($@"<input type=""hidden"" name=""{key}"" value=""{value}"" />");
+                            writer.WriteLine($@"<input type=""hidden"" name=""{_encoder.Encode(key)}"" value=""{_encoder.Encode(value)}"" />");
                         }
 
                         writer.WriteLine(@"<noscript>Click here to finish the authorization process: <input type=""submit"" /></noscript>");
@@ -444,19 +411,14 @@ namespace OpenIddict.Server.Owin
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyAuthorizationResponseContext>()
                         .AddFilter<RequireOwinRequest>()
                         .UseSingletonHandler<ProcessQueryResponse>()
-                        .SetOrder(ProcessFragmentResponse.Descriptor.Order - 1_000)
+                        .SetOrder(ProcessFormPostResponse.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] ApplyAuthorizationResponseContext context)
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(ApplyAuthorizationResponseContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
@@ -464,9 +426,9 @@ namespace OpenIddict.Server.Owin
                     // This handler only applies to OWIN requests. If The OWIN request cannot be resolved,
                     // this may indicate that the request was incorrectly processed by another server stack.
                     var response = context.Transaction.GetOwinRequest()?.Context.Response;
-                    if (response == null)
+                    if (response is null)
                     {
-                        throw new InvalidOperationException("The OWIN request cannot be resolved.");
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0120));
                     }
 
                     if (string.IsNullOrEmpty(context.RedirectUri) ||
@@ -475,18 +437,22 @@ namespace OpenIddict.Server.Owin
                         return default;
                     }
 
-                    context.Logger.LogInformation("The authorization response was successfully returned to " +
-                                                  "'{RedirectUri}' using the query response mode: {Response}.",
-                                                  context.RedirectUri, context.Response);
+                    context.Logger.LogInformation(SR.GetResourceString(SR.ID6148), context.RedirectUri, context.Response);
 
                     var location = context.RedirectUri;
 
                     // Note: while initially not allowed by the core OAuth 2.0 specification, multiple parameters
                     // with the same name are used by derived drafts like the OAuth 2.0 token exchange specification.
                     // For consistency, multiple parameters with the same name are also supported by this endpoint.
-                    foreach (var parameter in context.Response.GetFlattenedParameters())
+                    foreach (var (key, value) in
+                        from parameter in context.Response.GetParameters()
+                        let values = (string?[]?) parameter.Value
+                        where values is not null
+                        from value in values
+                        where !string.IsNullOrEmpty(value)
+                        select (parameter.Key, Value: value))
                     {
-                        location = WebUtilities.AddQueryString(location, parameter.Key, parameter.Value);
+                        location = WebUtilities.AddQueryString(location, key, value);
                     }
 
                     response.Redirect(location);
@@ -509,19 +475,14 @@ namespace OpenIddict.Server.Owin
                     = OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyAuthorizationResponseContext>()
                         .AddFilter<RequireOwinRequest>()
                         .UseSingletonHandler<ProcessFragmentResponse>()
-                        .SetOrder(ProcessLocalErrorResponse.Descriptor.Order - 1_000)
+                        .SetOrder(ProcessQueryResponse.Descriptor.Order + 1_000)
+                        .SetType(OpenIddictServerHandlerType.BuiltIn)
                         .Build();
 
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] ApplyAuthorizationResponseContext context)
+                /// <inheritdoc/>
+                public ValueTask HandleAsync(ApplyAuthorizationResponseContext context)
                 {
-                    if (context == null)
+                    if (context is null)
                     {
                         throw new ArgumentNullException(nameof(context));
                     }
@@ -529,9 +490,9 @@ namespace OpenIddict.Server.Owin
                     // This handler only applies to OWIN requests. If The OWIN request cannot be resolved,
                     // this may indicate that the request was incorrectly processed by another server stack.
                     var response = context.Transaction.GetOwinRequest()?.Context.Response;
-                    if (response == null)
+                    if (response is null)
                     {
-                        throw new InvalidOperationException("The OWIN request cannot be resolved.");
+                        throw new InvalidOperationException(SR.GetResourceString(SR.ID0120));
                     }
 
                     if (string.IsNullOrEmpty(context.RedirectUri) ||
@@ -540,21 +501,25 @@ namespace OpenIddict.Server.Owin
                         return default;
                     }
 
-                    context.Logger.LogInformation("The authorization response was successfully returned to " +
-                                                  "'{RedirectUri}' using the fragment response mode: {Response}.",
-                                                  context.RedirectUri, context.Response);
+                    context.Logger.LogInformation(SR.GetResourceString(SR.ID6149), context.RedirectUri, context.Response);
 
                     var builder = new StringBuilder(context.RedirectUri);
 
                     // Note: while initially not allowed by the core OAuth 2.0 specification, multiple parameters
                     // with the same name are used by derived drafts like the OAuth 2.0 token exchange specification.
                     // For consistency, multiple parameters with the same name are also supported by this endpoint.
-                    foreach (var parameter in context.Response.GetFlattenedParameters())
+                    foreach (var (key, value) in
+                        from parameter in context.Response.GetParameters()
+                        let values = (string?[]?) parameter.Value
+                        where values is not null
+                        from value in values
+                        where !string.IsNullOrEmpty(value)
+                        select (parameter.Key, Value: value))
                     {
                         builder.Append(Contains(builder, '#') ? '&' : '#')
-                               .Append(Uri.EscapeDataString(parameter.Key))
+                               .Append(Uri.EscapeDataString(key))
                                .Append('=')
-                               .Append(Uri.EscapeDataString(parameter.Value));
+                               .Append(Uri.EscapeDataString(value));
                     }
 
                     response.Redirect(builder.ToString());
@@ -574,149 +539,6 @@ namespace OpenIddict.Server.Owin
 
                         return false;
                     }
-                }
-            }
-
-            /// <summary>
-            /// Contains the logic responsible of processing authorization responses that must be handled by another
-            /// middleware in the pipeline at a later stage (e.g an ASP.NET MVC action or a NancyFX module).
-            /// Note: this handler is not used when the OpenID Connect request is not initially handled by OWIN.
-            /// </summary>
-            public class ProcessPassthroughErrorResponse : IOpenIddictServerHandler<ApplyAuthorizationResponseContext>
-            {
-                /// <summary>
-                /// Gets the default descriptor definition assigned to this handler.
-                /// </summary>
-                public static OpenIddictServerHandlerDescriptor Descriptor { get; }
-                    = OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyAuthorizationResponseContext>()
-                        .AddFilter<RequireOwinRequest>()
-                        .AddFilter<RequireErrorPassthroughEnabled>()
-                        .AddFilter<RequireAuthorizationEndpointPassthroughEnabled>()
-                        .UseSingletonHandler<ProcessPassthroughErrorResponse>()
-                        .SetOrder(ProcessLocalErrorResponse.Descriptor.Order - 1_000)
-                        .Build();
-
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public ValueTask HandleAsync([NotNull] ApplyAuthorizationResponseContext context)
-                {
-                    if (context == null)
-                    {
-                        throw new ArgumentNullException(nameof(context));
-                    }
-
-                    // This handler only applies to OWIN requests. If The OWIN request cannot be resolved,
-                    // this may indicate that the request was incorrectly processed by another server stack.
-                    var response = context.Transaction.GetOwinRequest()?.Context.Response;
-                    if (response == null)
-                    {
-                        throw new InvalidOperationException("The OWIN request cannot be resolved.");
-                    }
-
-                    if (string.IsNullOrEmpty(context.Response.Error) || !string.IsNullOrEmpty(context.RedirectUri))
-                    {
-                        return default;
-                    }
-
-                    // Don't return the state originally sent by the client application.
-                    context.Response.State = null;
-
-                    // Apply a 400 status code by default.
-                    response.StatusCode = 400;
-
-                    context.SkipRequest();
-
-                    return default;
-                }
-            }
-
-            /// <summary>
-            /// Contains the logic responsible of processing authorization responses that must be returned as plain-text.
-            /// Note: this handler is not used when the OpenID Connect request is not initially handled by OWIN.
-            /// </summary>
-            public class ProcessLocalErrorResponse : IOpenIddictServerHandler<ApplyAuthorizationResponseContext>
-            {
-                /// <summary>
-                /// Gets the default descriptor definition assigned to this handler.
-                /// </summary>
-                public static OpenIddictServerHandlerDescriptor Descriptor { get; }
-                    = OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyAuthorizationResponseContext>()
-                        .AddFilter<RequireOwinRequest>()
-                        .UseSingletonHandler<ProcessLocalErrorResponse>()
-                        .SetOrder(int.MaxValue - 100_000)
-                        .Build();
-
-                /// <summary>
-                /// Processes the event.
-                /// </summary>
-                /// <param name="context">The context associated with the event to process.</param>
-                /// <returns>
-                /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-                /// </returns>
-                public async ValueTask HandleAsync([NotNull] ApplyAuthorizationResponseContext context)
-                {
-                    if (context == null)
-                    {
-                        throw new ArgumentNullException(nameof(context));
-                    }
-
-                    // This handler only applies to OWIN requests. If The OWIN request cannot be resolved,
-                    // this may indicate that the request was incorrectly processed by another server stack.
-                    var response = context.Transaction.GetOwinRequest()?.Context.Response;
-                    if (response == null)
-                    {
-                        throw new InvalidOperationException("The OWIN request cannot be resolved.");
-                    }
-
-                    if (string.IsNullOrEmpty(context.Response.Error) || !string.IsNullOrEmpty(context.RedirectUri))
-                    {
-                        return;
-                    }
-
-                    // Don't return the state originally sent by the client application.
-                    context.Response.State = null;
-
-                    // Apply a 400 status code by default.
-                    response.StatusCode = 400;
-
-                    context.Logger.LogInformation("The authorization response was successfully returned " +
-                                                  "as a plain-text document: {Response}.", context.Response);
-
-                    using (var buffer = new MemoryStream())
-                    using (var writer = new StreamWriter(buffer))
-                    {
-                        foreach (var parameter in context.Response.GetParameters())
-                        {
-                            // Ignore null or empty parameters, including JSON
-                            // objects that can't be represented as strings.
-                            var value = (string) parameter.Value;
-                            if (string.IsNullOrEmpty(value))
-                            {
-                                continue;
-                            }
-
-                            writer.WriteLine("{0}:{1}", parameter.Key, value);
-                        }
-
-                        writer.Flush();
-
-                        response.ContentLength = buffer.Length;
-                        response.ContentType = "text/plain;charset=UTF-8";
-
-                        response.Headers["Cache-Control"] = "no-cache";
-                        response.Headers["Pragma"] = "no-cache";
-                        response.Headers["Expires"] = "Thu, 01 Jan 1970 00:00:00 GMT";
-
-                        buffer.Seek(offset: 0, loc: SeekOrigin.Begin);
-                        await buffer.CopyToAsync(response.Body, 4096, response.Context.Request.CallCancelled);
-                    }
-
-                    context.HandleRequest();
                 }
             }
         }

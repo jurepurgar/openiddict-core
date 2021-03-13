@@ -5,10 +5,8 @@
  */
 
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Security.Claims;
-using JetBrains.Annotations;
 using Microsoft.Extensions.Logging;
 using OpenIddict.Abstractions;
 
@@ -25,13 +23,22 @@ namespace OpenIddict.Server
             /// <summary>
             /// Creates a new instance of the <see cref="BaseContext"/> class.
             /// </summary>
-            protected BaseContext([NotNull] OpenIddictServerTransaction transaction)
+            protected BaseContext(OpenIddictServerTransaction transaction)
                 => Transaction = transaction ?? throw new ArgumentNullException(nameof(transaction));
 
             /// <summary>
             /// Gets the environment associated with the current request being processed.
             /// </summary>
             public OpenIddictServerTransaction Transaction { get; }
+
+            /// <summary>
+            /// Gets or sets the issuer address associated with the current transaction, if available.
+            /// </summary>
+            public Uri? Issuer
+            {
+                get => Transaction.Issuer;
+                set => Transaction.Issuer = value;
+            }
 
             /// <summary>
             /// Gets or sets the endpoint type that handled the request, if applicable.
@@ -51,39 +58,18 @@ namespace OpenIddict.Server
             /// Gets the OpenIddict server options.
             /// </summary>
             public OpenIddictServerOptions Options => Transaction.Options;
-
-            /// <summary>
-            /// Gets the dictionary containing the properties associated with this event.
-            /// </summary>
-            public IDictionary<string, object> Properties { get; }
-                = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-
-            /// <summary>
-            /// Gets or sets the OpenIddict request or <c>null</c> if it couldn't be extracted.
-            /// </summary>
-            public OpenIddictRequest Request
-            {
-                get => Transaction.Request;
-                set => Transaction.Request = value;
-            }
-
-            /// <summary>
-            /// Gets or sets the OpenIddict response, if applicable.
-            /// </summary>
-            public OpenIddictResponse Response
-            {
-                get => Transaction.Response;
-                set => Transaction.Response = value;
-            }
         }
 
+        /// <summary>
+        /// Represents an abstract base class used for certain event contexts.
+        /// </summary>
         [EditorBrowsable(EditorBrowsableState.Never)]
         public abstract class BaseRequestContext : BaseContext
         {
             /// <summary>
             /// Creates a new instance of the <see cref="BaseRequestContext"/> class.
             /// </summary>
-            protected BaseRequestContext([NotNull] OpenIddictServerTransaction transaction)
+            protected BaseRequestContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
             }
@@ -122,7 +108,7 @@ namespace OpenIddict.Server
             /// <summary>
             /// Creates a new instance of the <see cref="BaseValidatingClientContext"/> class.
             /// </summary>
-            protected BaseValidatingClientContext([NotNull] OpenIddictServerTransaction transaction)
+            protected BaseValidatingClientContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
             }
@@ -132,14 +118,14 @@ namespace OpenIddict.Server
             /// The authorization server application is responsible for
             /// validating this value to ensure it identifies a registered client.
             /// </summary>
-            public string ClientId => (string) Request[OpenIddictConstants.Parameters.ClientId];
+            public string? ClientId => Transaction.Request?.ClientId;
 
             /// <summary>
             /// Gets the "client_secret" parameter for the current request.
             /// The authorization server application is responsible for
             /// validating this value to ensure it identifies a registered client.
             /// </summary>
-            public string ClientSecret => (string) Request[OpenIddictConstants.Parameters.ClientSecret];
+            public string? ClientSecret => Transaction.Request?.ClientSecret;
         }
 
         /// <summary>
@@ -151,7 +137,7 @@ namespace OpenIddict.Server
             /// <summary>
             /// Creates a new instance of the <see cref="BaseValidatingContext"/> class.
             /// </summary>
-            protected BaseValidatingContext([NotNull] OpenIddictServerTransaction transaction)
+            protected BaseValidatingContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
             }
@@ -164,46 +150,17 @@ namespace OpenIddict.Server
             /// <summary>
             /// Gets or sets the "error" parameter returned to the client application.
             /// </summary>
-            public string Error { get; private set; }
+            public string? Error { get; private set; }
 
             /// <summary>
             /// Gets or sets the "error_description" parameter returned to the client application.
             /// </summary>
-            public string ErrorDescription { get; private set; }
+            public string? ErrorDescription { get; private set; }
 
             /// <summary>
             /// Gets or sets the "error_uri" parameter returned to the client application.
             /// </summary>
-            public string ErrorUri { get; private set; }
-
-            /// <summary>
-            /// Rejects the request.
-            /// </summary>
-            public virtual void Reject() => IsRejected = true;
-
-            /// <summary>
-            /// Rejects the request.
-            /// </summary>
-            /// <param name="error">The "error" parameter returned to the client application.</param>
-            public virtual void Reject(string error)
-            {
-                Error = error;
-
-                Reject();
-            }
-
-            /// <summary>
-            /// Rejects the request.
-            /// </summary>
-            /// <param name="error">The "error" parameter returned to the client application.</param>
-            /// <param name="description">The "error_description" parameter returned to the client application.</param>
-            public virtual void Reject(string error, string description)
-            {
-                Error = error;
-                ErrorDescription = description;
-
-                Reject();
-            }
+            public string? ErrorUri { get; private set; }
 
             /// <summary>
             /// Rejects the request.
@@ -211,13 +168,13 @@ namespace OpenIddict.Server
             /// <param name="error">The "error" parameter returned to the client application.</param>
             /// <param name="description">The "error_description" parameter returned to the client application.</param>
             /// <param name="uri">The "error_uri" parameter returned to the client application.</param>
-            public virtual void Reject(string error, string description, string uri)
+            public virtual void Reject(string? error = null, string? description = null, string? uri = null)
             {
                 Error = error;
                 ErrorDescription = description;
                 ErrorUri = uri;
 
-                Reject();
+                IsRejected = true;
             }
         }
 
@@ -230,7 +187,7 @@ namespace OpenIddict.Server
             /// <summary>
             /// Creates a new instance of the <see cref="BaseValidatingTicketContext"/> class.
             /// </summary>
-            protected BaseValidatingTicketContext([NotNull] OpenIddictServerTransaction transaction)
+            protected BaseValidatingTicketContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
             }
@@ -238,23 +195,12 @@ namespace OpenIddict.Server
             /// <summary>
             /// Gets or sets the security principal.
             /// </summary>
-            public ClaimsPrincipal Principal { get; set; }
+            public ClaimsPrincipal? Principal { get; set; }
 
             /// <summary>
             /// Gets the client identifier, or <c>null</c> if the client application is unknown.
             /// </summary>
-            public string ClientId => Request.ClientId;
-
-            /// <summary>
-            /// Gets a boolean indicating whether the
-            /// <see cref="HandleAuthentication()"/> method was called.
-            /// </summary>
-            public bool IsHandled { get; private set; }
-
-            /// <summary>
-            /// Marks the authentication process as handled by the application code.
-            /// </summary>
-            public void HandleAuthentication() => IsHandled = true;
+            public string? ClientId => Transaction.Request?.ClientId;
         }
 
         /// <summary>
@@ -265,7 +211,7 @@ namespace OpenIddict.Server
             /// <summary>
             /// Creates a new instance of the <see cref="ProcessRequestContext"/> class.
             /// </summary>
-            public ProcessRequestContext([NotNull] OpenIddictServerTransaction transaction)
+            public ProcessRequestContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
             }
@@ -274,14 +220,32 @@ namespace OpenIddict.Server
         /// <summary>
         /// Represents an event called when processing an errored response.
         /// </summary>
-        public class ProcessErrorResponseContext : BaseRequestContext
+        public class ProcessErrorContext : BaseRequestContext
         {
             /// <summary>
-            /// Creates a new instance of the <see cref="ProcessErrorResponseContext"/> class.
+            /// Creates a new instance of the <see cref="ProcessErrorContext"/> class.
             /// </summary>
-            public ProcessErrorResponseContext([NotNull] OpenIddictServerTransaction transaction)
+            public ProcessErrorContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
+            }
+
+            /// <summary>
+            /// Gets or sets the request or <c>null</c> if it couldn't be extracted.
+            /// </summary>
+            public OpenIddictRequest? Request
+            {
+                get => Transaction.Request;
+                set => Transaction.Request = value;
+            }
+
+            /// <summary>
+            /// Gets or sets the response.
+            /// </summary>
+            public OpenIddictResponse Response
+            {
+                get => Transaction.Response!;
+                set => Transaction.Response = value;
             }
         }
 
@@ -293,15 +257,34 @@ namespace OpenIddict.Server
             /// <summary>
             /// Creates a new instance of the <see cref="ProcessAuthenticationContext"/> class.
             /// </summary>
-            public ProcessAuthenticationContext([NotNull] OpenIddictServerTransaction transaction)
+            public ProcessAuthenticationContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
             }
 
             /// <summary>
+            /// Gets or sets the request.
+            /// </summary>
+            public OpenIddictRequest Request
+            {
+                get => Transaction.Request!;
+                set => Transaction.Request = value;
+            }
+
+            /// <summary>
             /// Gets or sets the security principal.
             /// </summary>
-            public ClaimsPrincipal Principal { get; set; }
+            public ClaimsPrincipal? Principal { get; set; }
+
+            /// <summary>
+            /// Gets or sets the token to validate.
+            /// </summary>
+            public string? Token { get; set; }
+
+            /// <summary>
+            /// Gets or sets the expected type of the token.
+            /// </summary>
+            public string? TokenType { get; set; }
         }
 
         /// <summary>
@@ -312,69 +295,265 @@ namespace OpenIddict.Server
             /// <summary>
             /// Creates a new instance of the <see cref="ProcessChallengeContext"/> class.
             /// </summary>
-            public ProcessChallengeContext([NotNull] OpenIddictServerTransaction transaction)
+            public ProcessChallengeContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
+            }
+
+            /// <summary>
+            /// Gets or sets the request.
+            /// </summary>
+            public OpenIddictRequest Request
+            {
+                get => Transaction.Request!;
+                set => Transaction.Request = value;
+            }
+
+            /// <summary>
+            /// Gets or sets the response.
+            /// </summary>
+            public OpenIddictResponse Response
+            {
+                get => Transaction.Response!;
+                set => Transaction.Response = value;
             }
         }
 
         /// <summary>
         /// Represents an event called when processing a sign-in response.
         /// </summary>
-        public class ProcessSigninContext : BaseValidatingTicketContext
+        public class ProcessSignInContext : BaseValidatingTicketContext
         {
             /// <summary>
-            /// Creates a new instance of the <see cref="ProcessSigninContext"/> class.
+            /// Creates a new instance of the <see cref="ProcessSignInContext"/> class.
             /// </summary>
-            public ProcessSigninContext([NotNull] OpenIddictServerTransaction transaction)
+            public ProcessSignInContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
             }
 
             /// <summary>
+            /// Gets or sets the request.
+            /// </summary>
+            public OpenIddictRequest Request
+            {
+                get => Transaction.Request!;
+                set => Transaction.Request = value;
+            }
+
+            /// <summary>
+            /// Gets or sets the response.
+            /// </summary>
+            public OpenIddictResponse Response
+            {
+                get => Transaction.Response!;
+                set => Transaction.Response = value;
+            }
+
+            /// <summary>
             /// Gets or sets a boolean indicating whether an access token
-            /// should be returned to the client application.
+            /// should be generated (and optionally returned to the client).
+            /// Note: overriding the value of this property is generally not
+            /// recommended, except when dealing with non-standard clients.
+            /// </summary>
+            public bool GenerateAccessToken { get; set; }
+
+            /// <summary>
+            /// Gets or sets a boolean indicating whether an authorization code
+            /// should be generated (and optionally returned to the client).
+            /// Note: overriding the value of this property is generally not
+            /// recommended, except when dealing with non-standard clients.
+            /// </summary>
+            public bool GenerateAuthorizationCode { get; set; }
+
+            /// <summary>
+            /// Gets or sets a boolean indicating whether a device code
+            /// should be generated (and optionally returned to the client).
+            /// Note: overriding the value of this property is generally not
+            /// recommended, except when dealing with non-standard clients.
+            /// </summary>
+            public bool GenerateDeviceCode { get; set; }
+
+            /// <summary>
+            /// Gets or sets a boolean indicating whether an identity token
+            /// should be generated (and optionally returned to the client).
+            /// Note: overriding the value of this property is generally not
+            /// recommended, except when dealing with non-standard clients.
+            /// </summary>
+            public bool GenerateIdentityToken { get; set; }
+
+            /// <summary>
+            /// Gets or sets a boolean indicating whether a refresh token
+            /// should be generated (and optionally returned to the client).
+            /// Note: overriding the value of this property is generally not
+            /// recommended, except when dealing with non-standard clients.
+            /// </summary>
+            public bool GenerateRefreshToken { get; set; }
+
+            /// <summary>
+            /// Gets or sets a boolean indicating whether a user code
+            /// should be generated (and optionally returned to the client).
+            /// Note: overriding the value of this property is generally not
+            /// recommended, except when dealing with non-standard clients.
+            /// </summary>
+            public bool GenerateUserCode { get; set; }
+
+            /// <summary>
+            /// Gets or sets a boolean indicating whether the generated access token
+            /// should be returned to the client application as part of the response.
             /// Note: overriding the value of this property is generally not
             /// recommended, except when dealing with non-standard clients.
             /// </summary>
             public bool IncludeAccessToken { get; set; }
 
             /// <summary>
-            /// Gets or sets a boolean indicating whether an authorization code
-            /// should be returned to the client application.
+            /// Gets or sets a boolean indicating whether the generated authorization code
+            /// should be returned to the client application as part of the response.
             /// Note: overriding the value of this property is generally not
             /// recommended, except when dealing with non-standard clients.
             /// </summary>
             public bool IncludeAuthorizationCode { get; set; }
 
             /// <summary>
-            /// Gets or sets a boolean indicating whether an identity token
-            /// should be returned to the client application.
+            /// Gets or sets a boolean indicating whether the generated device code
+            /// should be returned to the client application as part of the response.
+            /// Note: overriding the value of this property is generally not
+            /// recommended, except when dealing with non-standard clients.
+            /// </summary>
+            public bool IncludeDeviceCode { get; set; }
+
+            /// <summary>
+            /// Gets or sets a boolean indicating whether the generated identity token
+            /// should be returned to the client application as part of the response.
             /// Note: overriding the value of this property is generally not
             /// recommended, except when dealing with non-standard clients.
             /// </summary>
             public bool IncludeIdentityToken { get; set; }
 
             /// <summary>
-            /// Gets or sets a boolean indicating whether a refresh token
-            /// should be returned to the client application.
+            /// Gets or sets a boolean indicating whether the generated refresh token
+            /// should be returned to the client application as part of the response.
             /// Note: overriding the value of this property is generally not
             /// recommended, except when dealing with non-standard clients.
             /// </summary>
             public bool IncludeRefreshToken { get; set; }
+
+            /// <summary>
+            /// Gets or sets a boolean indicating whether the generated user code
+            /// should be returned to the client application as part of the response.
+            /// Note: overriding the value of this property is generally not
+            /// recommended, except when dealing with non-standard clients.
+            /// </summary>
+            public bool IncludeUserCode { get; set; }
+
+            /// <summary>
+            /// Gets or sets the generated access token, if applicable.
+            /// The access token will only be returned if
+            /// <see cref="IncludeAccessToken"/> is set to <c>true</c>.
+            /// </summary>
+            public string? AccessToken { get; set; }
+
+            /// <summary>
+            /// Gets or sets the principal containing the claims that
+            /// will be used to create the access token, if applicable.
+            /// </summary>
+            public ClaimsPrincipal? AccessTokenPrincipal { get; set; }
+
+            /// <summary>
+            /// Gets or sets the generated authorization code, if applicable.
+            /// The authorization code will only be returned if
+            /// <see cref="IncludeAuthorizationCode"/> is set to <c>true</c>.
+            /// </summary>
+            public string? AuthorizationCode { get; set; }
+
+            /// <summary>
+            /// Gets or sets the principal containing the claims that
+            /// will be used to create the authorization code, if applicable.
+            /// </summary>
+            public ClaimsPrincipal? AuthorizationCodePrincipal { get; set; }
+
+            /// <summary>
+            /// Gets or sets the generated device code, if applicable.
+            /// The device code will only be returned if
+            /// <see cref="IncludeDeviceCode"/> is set to <c>true</c>.
+            /// </summary>
+            public string? DeviceCode { get; set; }
+
+            /// <summary>
+            /// Gets or sets the principal containing the claims that
+            /// will be used to create the device code, if applicable.
+            /// </summary>
+            public ClaimsPrincipal? DeviceCodePrincipal { get; set; }
+
+            /// <summary>
+            /// Gets or sets the generated identity token, if applicable.
+            /// The identity token will only be returned if
+            /// <see cref="IncludeIdentityToken"/> is set to <c>true</c>.
+            /// </summary>
+            public string? IdentityToken { get; set; }
+
+            /// <summary>
+            /// Gets or sets the principal containing the claims that
+            /// will be used to create the identity token, if applicable.
+            /// </summary>
+            public ClaimsPrincipal? IdentityTokenPrincipal { get; set; }
+
+            /// <summary>
+            /// Gets or sets the generated refresh token, if applicable.
+            /// The refresh token will only be returned if
+            /// <see cref="IncludeRefreshToken"/> is set to <c>true</c>.
+            /// </summary>
+            public string? RefreshToken { get; set; }
+
+            /// <summary>
+            /// Gets or sets the principal containing the claims that
+            /// will be used to create the refresh token, if applicable.
+            /// </summary>
+            public ClaimsPrincipal? RefreshTokenPrincipal { get; set; }
+
+            /// <summary>
+            /// Gets or sets the generated user code, if applicable.
+            /// The user code will only be returned if
+            /// <see cref="IncludeUserCode"/> is set to <c>true</c>.
+            /// </summary>
+            public string? UserCode { get; set; }
+
+            /// <summary>
+            /// Gets or sets the principal containing the claims that
+            /// will be used to create the user code, if applicable.
+            /// </summary>
+            public ClaimsPrincipal? UserCodePrincipal { get; set; }
         }
 
         /// <summary>
         /// Represents an event called when processing a sign-out response.
         /// </summary>
-        public class ProcessSignoutContext : BaseValidatingContext
+        public class ProcessSignOutContext : BaseValidatingContext
         {
             /// <summary>
-            /// Creates a new instance of the <see cref="ProcessSignoutContext"/> class.
+            /// Creates a new instance of the <see cref="ProcessSignOutContext"/> class.
             /// </summary>
-            public ProcessSignoutContext([NotNull] OpenIddictServerTransaction transaction)
+            public ProcessSignOutContext(OpenIddictServerTransaction transaction)
                 : base(transaction)
             {
+            }
+
+            /// <summary>
+            /// Gets or sets the request.
+            /// </summary>
+            public OpenIddictRequest Request
+            {
+                get => Transaction.Request!;
+                set => Transaction.Request = value;
+            }
+
+            /// <summary>
+            /// Gets or sets the response.
+            /// </summary>
+            public OpenIddictResponse Response
+            {
+                get => Transaction.Response!;
+                set => Transaction.Response = value;
             }
         }
     }

@@ -17,11 +17,21 @@ namespace OpenIddict.Server.AspNetCore
             public const string LogoutRequest = "openiddict-logout-request:";
         }
 
+        public static class JsonWebTokenTypes
+        {
+            public static class Private
+            {
+                public const string AuthorizationRequest = "oi_authrq+jwt";
+                public const string LogoutRequest = "oi_lgtrq+jwt";
+            }
+        }
+
         public static class Properties
         {
             public const string Error = ".error";
             public const string ErrorDescription = ".error_description";
             public const string ErrorUri = ".error_uri";
+            public const string Scope = ".scope";
         }
     }
 }

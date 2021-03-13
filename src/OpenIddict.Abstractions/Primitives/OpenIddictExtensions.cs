@@ -9,13 +9,15 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Security.Claims;
-using JetBrains.Annotations;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using Microsoft.Extensions.Primitives;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using static OpenIddict.Abstractions.OpenIddictConstants;
+using SR = OpenIddict.Abstractions.OpenIddictResources;
 
 namespace OpenIddict.Abstractions
 {
@@ -26,76 +28,59 @@ namespace OpenIddict.Abstractions
     public static class OpenIddictExtensions
     {
         /// <summary>
-        /// Gets all the parameters associated with the specified message as a flattened collection:
-        /// array parameters are automatically converted to multiple parameters and parameters that
-        /// can't be converted to string instances are ignored and excluded from the returned collection.
-        /// This extension is primarily intended to be used by components that need to represent
-        /// an OpenID Connect message as a query string or as a list of key/value pairs in a HTTP form.
-        /// </summary>
-        /// <param name="message">The <see cref="OpenIddictMessage"/> instance.</param>
-        /// <returns>The parameters, as a flattened collection.</returns>
-        public static ImmutableList<KeyValuePair<string, string>> GetFlattenedParameters([NotNull] this OpenIddictMessage message)
-        {
-            if (message == null)
-            {
-                throw new ArgumentNullException(nameof(message));
-            }
-
-            var parameters = ImmutableList.CreateBuilder<KeyValuePair<string, string>>();
-
-            foreach (var parameter in message.GetParameters())
-            {
-                var values = (string[]) parameter.Value;
-                if (values == null)
-                {
-                    continue;
-                }
-
-                foreach (var value in values)
-                {
-                    parameters.Add(new KeyValuePair<string, string>(parameter.Key, value));
-                }
-            }
-
-            return parameters.ToImmutable();
-        }
-
-        /// <summary>
         /// Extracts the authentication context class values from an <see cref="OpenIddictRequest"/>.
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-        public static ImmutableHashSet<string> GetAcrValues([NotNull] this OpenIddictRequest request)
+        public static ImmutableArray<string> GetAcrValues(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
 
-            if (string.IsNullOrEmpty(request.AcrValues))
+            return GetValues(request.AcrValues, Separators.Space);
+        }
+
+        /// <summary>
+        /// Extracts the prompt values from an <see cref="OpenIddictRequest"/>.
+        /// </summary>
+        /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
+        public static ImmutableArray<string> GetPrompts(this OpenIddictRequest request)
+        {
+            if (request is null)
             {
-                return ImmutableHashSet.Create<string>(StringComparer.Ordinal);
+                throw new ArgumentNullException(nameof(request));
             }
 
-            return ImmutableHashSet.CreateRange(StringComparer.Ordinal, GetValues(request.AcrValues, Separators.Space));
+            return GetValues(request.Prompt, Separators.Space);
+        }
+
+        /// <summary>
+        /// Extracts the response types from an <see cref="OpenIddictRequest"/>.
+        /// </summary>
+        /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
+        public static ImmutableArray<string> GetResponseTypes(this OpenIddictRequest request)
+        {
+            if (request is null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+
+            return GetValues(request.ResponseType, Separators.Space);
         }
 
         /// <summary>
         /// Extracts the scopes from an <see cref="OpenIddictRequest"/>.
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-        public static ImmutableHashSet<string> GetScopes([NotNull] this OpenIddictRequest request)
+        public static ImmutableArray<string> GetScopes(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
 
-            if (string.IsNullOrEmpty(request.Scope))
-            {
-                return ImmutableHashSet.Create<string>(StringComparer.Ordinal);
-            }
-
-            return ImmutableHashSet.CreateRange(StringComparer.Ordinal, GetValues(request.Scope, Separators.Space));
+            return GetValues(request.Scope, Separators.Space);
         }
 
         /// <summary>
@@ -103,21 +88,16 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <param name="value">The component to look for in the parameter.</param>
-        public static bool HasAcrValue([NotNull] this OpenIddictRequest request, [NotNull] string value)
+        public static bool HasAcrValue(this OpenIddictRequest request, string value)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
 
             if (string.IsNullOrEmpty(value))
             {
-                throw new ArgumentException("The value cannot be null or empty.", nameof(value));
-            }
-
-            if (string.IsNullOrEmpty(request.AcrValues))
-            {
-                return false;
+                throw new ArgumentException(SR.GetResourceString(SR.ID0177), nameof(value));
             }
 
             return HasValue(request.AcrValues, value, Separators.Space);
@@ -128,21 +108,16 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <param name="prompt">The component to look for in the parameter.</param>
-        public static bool HasPrompt([NotNull] this OpenIddictRequest request, [NotNull] string prompt)
+        public static bool HasPrompt(this OpenIddictRequest request, string prompt)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
 
             if (string.IsNullOrEmpty(prompt))
             {
-                throw new ArgumentException("The prompt cannot be null or empty.", nameof(prompt));
-            }
-
-            if (string.IsNullOrEmpty(request.Prompt))
-            {
-                return false;
+                throw new ArgumentException(SR.GetResourceString(SR.ID0178), nameof(prompt));
             }
 
             return HasValue(request.Prompt, prompt, Separators.Space);
@@ -153,21 +128,16 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <param name="type">The component to look for in the parameter.</param>
-        public static bool HasResponseType([NotNull] this OpenIddictRequest request, [NotNull] string type)
+        public static bool HasResponseType(this OpenIddictRequest request, string type)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The response type cannot be null or empty.", nameof(type));
-            }
-
-            if (string.IsNullOrEmpty(request.ResponseType))
-            {
-                return false;
+                throw new ArgumentException(SR.GetResourceString(SR.ID0179), nameof(type));
             }
 
             return HasValue(request.ResponseType, type, Separators.Space);
@@ -178,21 +148,16 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <param name="scope">The component to look for in the parameter.</param>
-        public static bool HasScope([NotNull] this OpenIddictRequest request, [NotNull] string scope)
+        public static bool HasScope(this OpenIddictRequest request, string scope)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
 
             if (string.IsNullOrEmpty(scope))
             {
-                throw new ArgumentException("The scope cannot be null or empty.", nameof(scope));
-            }
-
-            if (string.IsNullOrEmpty(request.Scope))
-            {
-                return false;
+                throw new ArgumentException(SR.GetResourceString(SR.ID0180), nameof(scope));
             }
 
             return HasValue(request.Scope, scope, Separators.Space);
@@ -204,9 +169,9 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <returns><c>true</c> if the request is a response_type=none request, <c>false</c> otherwise.</returns>
-        public static bool IsNoneFlow([NotNull] this OpenIddictRequest request)
+        public static bool IsNoneFlow(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -231,9 +196,9 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <returns><c>true</c> if the request is a code flow request, <c>false</c> otherwise.</returns>
-        public static bool IsAuthorizationCodeFlow([NotNull] this OpenIddictRequest request)
+        public static bool IsAuthorizationCodeFlow(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -259,9 +224,9 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <returns><c>true</c> if the request is an implicit flow request, <c>false</c> otherwise.</returns>
-        public static bool IsImplicitFlow([NotNull] this OpenIddictRequest request)
+        public static bool IsImplicitFlow(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -313,9 +278,9 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <returns><c>true</c> if the request is an hybrid flow request, <c>false</c> otherwise.</returns>
-        public static bool IsHybridFlow([NotNull] this OpenIddictRequest request)
+        public static bool IsHybridFlow(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -380,9 +345,9 @@ namespace OpenIddict.Abstractions
         /// <c>true</c> if the request specified the fragment response mode or if
         /// it's the default value for the requested flow, <c>false</c> otherwise.
         /// </returns>
-        public static bool IsFragmentResponseMode([NotNull] this OpenIddictRequest request)
+        public static bool IsFragmentResponseMode(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -413,9 +378,9 @@ namespace OpenIddict.Abstractions
         /// <c>true</c> if the request specified the query response mode or if
         /// it's the default value for the requested flow, <c>false</c> otherwise.
         /// </returns>
-        public static bool IsQueryResponseMode([NotNull] this OpenIddictRequest request)
+        public static bool IsQueryResponseMode(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -445,9 +410,9 @@ namespace OpenIddict.Abstractions
         /// <c>true</c> if the request specified the form post response mode or if
         /// it's the default value for the requested flow, <c>false</c> otherwise.
         /// </returns>
-        public static bool IsFormPostResponseMode([NotNull] this OpenIddictRequest request)
+        public static bool IsFormPostResponseMode(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -461,9 +426,9 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <returns><c>true</c> if the request is a code grant request, <c>false</c> otherwise.</returns>
-        public static bool IsAuthorizationCodeGrantType([NotNull] this OpenIddictRequest request)
+        public static bool IsAuthorizationCodeGrantType(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -477,9 +442,9 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <returns><c>true</c> if the request is a client credentials grant request, <c>false</c> otherwise.</returns>
-        public static bool IsClientCredentialsGrantType([NotNull] this OpenIddictRequest request)
+        public static bool IsClientCredentialsGrantType(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -488,14 +453,30 @@ namespace OpenIddict.Abstractions
         }
 
         /// <summary>
+        /// Determines whether the "grant_type" parameter corresponds to the device code grant.
+        /// See https://tools.ietf.org/html/rfc8628 for more information.
+        /// </summary>
+        /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
+        /// <returns><c>true</c> if the request is a device code grant request, <c>false</c> otherwise.</returns>
+        public static bool IsDeviceCodeGrantType(this OpenIddictRequest request)
+        {
+            if (request is null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+
+            return string.Equals(request.GrantType, GrantTypes.DeviceCode, StringComparison.Ordinal);
+        }
+
+        /// <summary>
         /// Determines whether the "grant_type" parameter corresponds to the password grant.
         /// See http://tools.ietf.org/html/rfc6749#section-4.3.2 for more information.
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <returns><c>true</c> if the request is a password grant request, <c>false</c> otherwise.</returns>
-        public static bool IsPasswordGrantType([NotNull] this OpenIddictRequest request)
+        public static bool IsPasswordGrantType(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -509,9 +490,9 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
         /// <returns><c>true</c> if the request is a refresh token grant request, <c>false</c> otherwise.</returns>
-        public static bool IsRefreshTokenGrantType([NotNull] this OpenIddictRequest request)
+        public static bool IsRefreshTokenGrantType(this OpenIddictRequest request)
         {
-            if (request == null)
+            if (request is null)
             {
                 throw new ArgumentNullException(nameof(request));
             }
@@ -524,21 +505,35 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="claim">The <see cref="Claim"/> instance.</param>
         /// <returns>The destinations associated with the claim.</returns>
-        public static ImmutableHashSet<string> GetDestinations([NotNull] this Claim claim)
+        public static ImmutableArray<string> GetDestinations(this Claim claim)
         {
-            if (claim == null)
+            if (claim is null)
             {
                 throw new ArgumentNullException(nameof(claim));
             }
 
-            claim.Properties.TryGetValue(Properties.Destinations, out string destinations);
+            claim.Properties.TryGetValue(Properties.Destinations, out string? destinations);
 
             if (string.IsNullOrEmpty(destinations))
             {
-                return ImmutableHashSet.Create<string>(StringComparer.OrdinalIgnoreCase);
+                return ImmutableArray.Create<string>();
             }
 
-            return ImmutableHashSet.CreateRange(StringComparer.OrdinalIgnoreCase, JArray.Parse(destinations).Values<string>());
+            using var document = JsonDocument.Parse(destinations);
+            var builder = ImmutableArray.CreateBuilder<string>(document.RootElement.GetArrayLength());
+
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                var value = element.GetString();
+                if (string.IsNullOrEmpty(value) || builder.Contains(value, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                builder.Add(value);
+            }
+
+            return builder.ToImmutable();
         }
 
         /// <summary>
@@ -546,19 +541,37 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="claim">The <see cref="Claim"/> instance.</param>
         /// <param name="destination">The required destination.</param>
-        public static bool HasDestination([NotNull] this Claim claim, [NotNull] string destination)
+        public static bool HasDestination(this Claim claim, string destination)
         {
-            if (claim == null)
+            if (claim is null)
             {
                 throw new ArgumentNullException(nameof(claim));
             }
 
             if (string.IsNullOrEmpty(destination))
             {
-                throw new ArgumentException("The destination cannot be null or empty.", nameof(destination));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0181), nameof(destination));
             }
 
-            return GetDestinations(claim).Contains(destination, StringComparer.OrdinalIgnoreCase);
+            claim.Properties.TryGetValue(Properties.Destinations, out string? destinations);
+
+            if (string.IsNullOrEmpty(destinations))
+            {
+                return false;
+            }
+
+            using var document = JsonDocument.Parse(destinations);
+
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                var value = element.GetString();
+                if (string.Equals(value, destination, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -566,14 +579,14 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="claim">The <see cref="Claim"/> instance.</param>
         /// <param name="destinations">The destinations.</param>
-        public static Claim SetDestinations([NotNull] this Claim claim, IEnumerable<string> destinations)
+        public static Claim SetDestinations(this Claim claim, ImmutableArray<string> destinations)
         {
-            if (claim == null)
+            if (claim is null)
             {
                 throw new ArgumentNullException(nameof(claim));
             }
 
-            if (destinations == null || !destinations.Any())
+            if (destinations.IsDefaultOrEmpty)
             {
                 claim.Properties.Remove(Properties.Destinations);
 
@@ -582,11 +595,27 @@ namespace OpenIddict.Abstractions
 
             if (destinations.Any(destination => string.IsNullOrEmpty(destination)))
             {
-                throw new ArgumentException("Destinations cannot be null or empty.", nameof(destinations));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0182), nameof(destinations));
             }
 
-            claim.Properties[Properties.Destinations] =
-                new JArray(destinations.Distinct(StringComparer.OrdinalIgnoreCase)).ToString(Formatting.None);
+            using var stream = new MemoryStream();
+            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
+            {
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                Indented = false
+            });
+
+            writer.WriteStartArray();
+
+            foreach (var destination in destinations.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                writer.WriteStringValue(destination);
+            }
+
+            writer.WriteEndArray();
+            writer.Flush();
+
+            claim.Properties[Properties.Destinations] = Encoding.UTF8.GetString(stream.ToArray());
 
             return claim;
         }
@@ -596,10 +625,82 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="claim">The <see cref="Claim"/> instance.</param>
         /// <param name="destinations">The destinations.</param>
-        public static Claim SetDestinations([NotNull] this Claim claim, params string[] destinations)
-            // Note: guarding the destinations parameter against null values
-            // is not necessary as AsEnumerable() doesn't throw on null values.
-            => claim.SetDestinations(destinations.AsEnumerable());
+        public static Claim SetDestinations(this Claim claim, IEnumerable<string>? destinations)
+            => claim.SetDestinations(destinations?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+
+        /// <summary>
+        /// Adds specific destinations to a claim.
+        /// </summary>
+        /// <param name="claim">The <see cref="Claim"/> instance.</param>
+        /// <param name="destinations">The destinations.</param>
+        public static Claim SetDestinations(this Claim claim, params string[]? destinations)
+            => claim.SetDestinations(destinations?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+
+        /// <summary>
+        /// Gets the destinations associated with all the claims of the given principal.
+        /// </summary>
+        /// <param name="principal">The principal.</param>
+        /// <returns>The destinations, returned as a flattened dictionary.</returns>
+        public static ImmutableDictionary<string, string[]> GetDestinations(this ClaimsPrincipal principal)
+        {
+            if (principal is null)
+            {
+                throw new ArgumentNullException(nameof(principal));
+            }
+
+            var builder = ImmutableDictionary.CreateBuilder<string, string[]>(StringComparer.Ordinal);
+
+            foreach (var group in principal.Claims.GroupBy(claim => claim.Type))
+            {
+                var claims = group.ToList();
+
+                var destinations = new HashSet<string>(claims[0].GetDestinations(), StringComparer.OrdinalIgnoreCase);
+                if (destinations.Count != 0)
+                {
+                    // Ensure the other claims of the same type use the same exact destinations.
+                    for (var index = 0; index < claims.Count; index++)
+                    {
+                        if (!destinations.SetEquals(claims[index].GetDestinations()))
+                        {
+                            throw new InvalidOperationException(SR.FormatID0183(group.Key));
+                        }
+                    }
+
+                    builder.Add(group.Key, destinations.ToArray());
+                }
+            }
+
+            return builder.ToImmutable();
+        }
+
+        /// <summary>
+        /// Sets the destinations associated with all the claims of the given principal.
+        /// </summary>
+        /// <param name="principal">The principal.</param>
+        /// <param name="destinations">The destinations, as a flattened dictionary.</param>
+        /// <returns>The principal.</returns>
+        public static ClaimsPrincipal SetDestinations(this ClaimsPrincipal principal, ImmutableDictionary<string, string[]> destinations)
+        {
+            if (principal is null)
+            {
+                throw new ArgumentNullException(nameof(principal));
+            }
+
+            if (destinations is null)
+            {
+                throw new ArgumentNullException(nameof(destinations));
+            }
+
+            foreach (var destination in destinations)
+            {
+                foreach (var claim in principal.Claims.Where(claim => claim.Type == destination.Key))
+                {
+                    claim.SetDestinations(destination.Value);
+                }
+            }
+
+            return principal;
+        }
 
         /// <summary>
         /// Clones an identity by filtering its claims and the claims of its actor, recursively.
@@ -609,16 +710,14 @@ namespace OpenIddict.Abstractions
         /// The delegate filtering the claims: return <c>true</c>
         /// to accept the claim, <c>false</c> to remove it.
         /// </param>
-        public static ClaimsIdentity Clone(
-            [NotNull] this ClaimsIdentity identity,
-            [NotNull] Func<Claim, bool> filter)
+        public static ClaimsIdentity Clone(this ClaimsIdentity identity, Func<Claim, bool> filter)
         {
-            if (identity == null)
+            if (identity is null)
             {
                 throw new ArgumentNullException(nameof(identity));
             }
 
-            if (filter == null)
+            if (filter is null)
             {
                 throw new ArgumentNullException(nameof(filter));
             }
@@ -635,7 +734,7 @@ namespace OpenIddict.Abstractions
                 }
             }
 
-            if (clone.Actor != null)
+            if (clone.Actor is not null)
             {
                 clone.Actor = clone.Actor.Clone(filter);
             }
@@ -651,16 +750,14 @@ namespace OpenIddict.Abstractions
         /// The delegate filtering the claims: return <c>true</c>
         /// to accept the claim, <c>false</c> to remove it.
         /// </param>
-        public static ClaimsPrincipal Clone(
-            [NotNull] this ClaimsPrincipal principal,
-            [NotNull] Func<Claim, bool> filter)
+        public static ClaimsPrincipal Clone(this ClaimsPrincipal principal, Func<Claim, bool> filter)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
-            if (filter == null)
+            if (filter is null)
             {
                 throw new ArgumentNullException(nameof(filter));
             }
@@ -681,23 +778,21 @@ namespace OpenIddict.Abstractions
         /// <param name="identity">The identity.</param>
         /// <param name="type">The type associated with the claim.</param>
         /// <param name="value">The value associated with the claim.</param>
-        public static ClaimsIdentity AddClaim(
-            [NotNull] this ClaimsIdentity identity,
-            [NotNull] string type, [NotNull] string value)
+        public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, string value)
         {
-            if (identity == null)
+            if (identity is null)
             {
                 throw new ArgumentNullException(nameof(identity));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             if (string.IsNullOrEmpty(value))
             {
-                throw new ArgumentException("The claim value cannot be null or empty.", nameof(value));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0185), nameof(value));
             }
 
             identity.AddClaim(new Claim(type, value));
@@ -711,29 +806,21 @@ namespace OpenIddict.Abstractions
         /// <param name="type">The type associated with the claim.</param>
         /// <param name="value">The value associated with the claim.</param>
         /// <param name="destinations">The destinations associated with the claim.</param>
-        public static ClaimsIdentity AddClaim(
-            [NotNull] this ClaimsIdentity identity,
-            [NotNull] string type, [NotNull] string value,
-            [NotNull] IEnumerable<string> destinations)
+        public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, string value, ImmutableArray<string> destinations)
         {
-            if (identity == null)
+            if (identity is null)
             {
                 throw new ArgumentNullException(nameof(identity));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             if (string.IsNullOrEmpty(value))
             {
-                throw new ArgumentException("The claim value cannot be null or empty.", nameof(value));
-            }
-
-            if (destinations == null)
-            {
-                throw new ArgumentNullException(nameof(destinations));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0185), nameof(value));
             }
 
             identity.AddClaim(new Claim(type, value).SetDestinations(destinations));
@@ -747,13 +834,8 @@ namespace OpenIddict.Abstractions
         /// <param name="type">The type associated with the claim.</param>
         /// <param name="value">The value associated with the claim.</param>
         /// <param name="destinations">The destinations associated with the claim.</param>
-        public static ClaimsIdentity AddClaim(
-            [NotNull] this ClaimsIdentity identity,
-            [NotNull] string type, [NotNull] string value,
-            [NotNull] params string[] destinations)
-            // Note: guarding the destinations parameter against null values
-            // is not necessary as AsEnumerable() doesn't throw on null values.
-            => identity.AddClaim(type, value, destinations.AsEnumerable());
+        public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, string value, params string[]? destinations)
+            => identity.AddClaim(type, value, destinations?.ToImmutableArray() ?? ImmutableArray.Create<string>());
 
         /// <summary>
         /// Gets the claim value corresponding to the given type.
@@ -761,16 +843,16 @@ namespace OpenIddict.Abstractions
         /// <param name="identity">The identity.</param>
         /// <param name="type">The type associated with the claim.</param>
         /// <returns>The claim value.</returns>
-        public static string GetClaim([NotNull] this ClaimsIdentity identity, [NotNull] string type)
+        public static string? GetClaim(this ClaimsIdentity identity, string type)
         {
-            if (identity == null)
+            if (identity is null)
             {
                 throw new ArgumentNullException(nameof(identity));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             return identity.FindFirst(type)?.Value;
@@ -782,16 +864,16 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The principal.</param>
         /// <param name="type">The type associated with the claim.</param>
         /// <returns>The claim value.</returns>
-        public static string GetClaim([NotNull] this ClaimsPrincipal principal, [NotNull] string type)
+        public static string? GetClaim(this ClaimsPrincipal principal, string type)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             return principal.FindFirst(type)?.Value;
@@ -803,19 +885,40 @@ namespace OpenIddict.Abstractions
         /// <param name="identity">The identity.</param>
         /// <param name="type">The type associated with the claims.</param>
         /// <returns>The claim values.</returns>
-        public static ImmutableHashSet<string> GetClaims([NotNull] this ClaimsIdentity identity, [NotNull] string type)
+        public static ImmutableArray<string> GetClaims(this ClaimsIdentity identity, string type)
         {
-            if (identity == null)
+            if (identity is null)
             {
                 throw new ArgumentNullException(nameof(identity));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
-            return ImmutableHashSet.CreateRange(StringComparer.Ordinal, identity.FindAll(type).Select(claim => claim.Value));
+            return identity.FindAll(type).Select(claim => claim.Value).Distinct(StringComparer.Ordinal).ToImmutableArray();
+        }
+
+        /// <summary>
+        /// Determines whether the claims identity contains at least one claim of the specified type.
+        /// </summary>
+        /// <param name="identity">The claims identity.</param>
+        /// <param name="type">The claim type.</param>
+        /// <returns><c>true</c> if the identity contains at least one claim of the specified type.</returns>
+        public static bool HasClaim(this ClaimsIdentity identity, string type)
+        {
+            if (identity is null)
+            {
+                throw new ArgumentNullException(nameof(identity));
+            }
+
+            if (string.IsNullOrEmpty(type))
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
+            }
+
+            return identity.FindAll(type).Any();
         }
 
         /// <summary>
@@ -824,19 +927,40 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The principal.</param>
         /// <param name="type">The type associated with the claims.</param>
         /// <returns>The claim values.</returns>
-        public static ImmutableHashSet<string> GetClaims([NotNull] this ClaimsPrincipal principal, [NotNull] string type)
+        public static ImmutableArray<string> GetClaims(this ClaimsPrincipal principal, string type)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
-            return ImmutableHashSet.CreateRange(StringComparer.Ordinal, principal.FindAll(type).Select(claim => claim.Value));
+            return principal.FindAll(type).Select(claim => claim.Value).Distinct(StringComparer.Ordinal).ToImmutableArray();
+        }
+
+        /// <summary>
+        /// Determines whether the claims principal contains at least one claim of the specified type.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="type">The claim type.</param>
+        /// <returns><c>true</c> if the principal contains at least one claim of the specified type.</returns>
+        public static bool HasClaim(this ClaimsPrincipal principal, string type)
+        {
+            if (principal is null)
+            {
+                throw new ArgumentNullException(nameof(principal));
+            }
+
+            if (string.IsNullOrEmpty(type))
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
+            }
+
+            return principal.FindAll(type).Any();
         }
 
         /// <summary>
@@ -845,16 +969,16 @@ namespace OpenIddict.Abstractions
         /// <param name="identity">The identity.</param>
         /// <param name="type">The type associated with the claims.</param>
         /// <returns>The claims identity.</returns>
-        public static ClaimsIdentity RemoveClaims([NotNull] this ClaimsIdentity identity, [NotNull] string type)
+        public static ClaimsIdentity RemoveClaims(this ClaimsIdentity identity, string type)
         {
-            if (identity == null)
+            if (identity is null)
             {
                 throw new ArgumentNullException(nameof(identity));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             foreach (var claim in identity.FindAll(type).ToList())
@@ -871,16 +995,16 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The principal.</param>
         /// <param name="type">The type associated with the claims.</param>
         /// <returns>The claims identity.</returns>
-        public static ClaimsPrincipal RemoveClaims([NotNull] this ClaimsPrincipal principal, [NotNull] string type)
+        public static ClaimsPrincipal RemoveClaims(this ClaimsPrincipal principal, string type)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             foreach (var identity in principal.Identities)
@@ -901,18 +1025,16 @@ namespace OpenIddict.Abstractions
         /// <param name="type">The type associated with the claims.</param>
         /// <param name="value">The claim value.</param>
         /// <returns>The claims identity.</returns>
-        public static ClaimsIdentity SetClaims(
-            [NotNull] this ClaimsIdentity identity,
-            [NotNull] string type, [CanBeNull] string value)
+        public static ClaimsIdentity SetClaims(this ClaimsIdentity identity, string type, string? value)
         {
-            if (identity == null)
+            if (identity is null)
             {
                 throw new ArgumentNullException(nameof(identity));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             identity.RemoveClaims(type);
@@ -932,25 +1054,28 @@ namespace OpenIddict.Abstractions
         /// <param name="type">The type associated with the claims.</param>
         /// <param name="value">The claim value.</param>
         /// <returns>The claims identity.</returns>
-        public static ClaimsPrincipal SetClaim(
-            [NotNull] this ClaimsPrincipal principal,
-            [NotNull] string type, [CanBeNull] string value)
+        public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, string? value)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
+            if (principal.Identity is not ClaimsIdentity identity)
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+            }
+
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             principal.RemoveClaims(type);
 
             if (!string.IsNullOrEmpty(value))
             {
-                ((ClaimsIdentity) principal.Identity).AddClaim(type, value);
+                identity.AddClaim(type, value);
             }
 
             return principal;
@@ -963,22 +1088,21 @@ namespace OpenIddict.Abstractions
         /// <param name="type">The type associated with the claims.</param>
         /// <param name="values">The claim values.</param>
         /// <returns>The claims identity.</returns>
-        public static ClaimsIdentity SetClaims([NotNull] this ClaimsIdentity identity,
-            [NotNull] string type, [NotNull] IEnumerable<string> values)
+        public static ClaimsIdentity SetClaims(this ClaimsIdentity identity, string type, ImmutableArray<string> values)
         {
-            if (identity == null)
+            if (identity is null)
             {
                 throw new ArgumentNullException(nameof(identity));
             }
 
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             identity.RemoveClaims(type);
 
-            foreach (var value in values)
+            foreach (var value in values.Distinct(StringComparer.Ordinal))
             {
                 identity.AddClaim(type, value);
             }
@@ -993,24 +1117,28 @@ namespace OpenIddict.Abstractions
         /// <param name="type">The type associated with the claims.</param>
         /// <param name="values">The claim values.</param>
         /// <returns>The claims identity.</returns>
-        public static ClaimsPrincipal SetClaims([NotNull] this ClaimsPrincipal principal,
-            [NotNull] string type, [NotNull] IEnumerable<string> values)
+        public static ClaimsPrincipal SetClaims(this ClaimsPrincipal principal, string type, ImmutableArray<string> values)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
+            if (principal.Identity is not ClaimsIdentity identity)
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+            }
+
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The claim type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
             }
 
             principal.RemoveClaims(type);
 
-            foreach (var value in values)
+            foreach (var value in values.Distinct(StringComparer.Ordinal))
             {
-                ((ClaimsIdentity) principal.Identity).AddClaim(type, value);
+                identity.AddClaim(type, value);
             }
 
             return principal;
@@ -1021,25 +1149,25 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The creation date or <c>null</c> if the claim cannot be found.</returns>
-        public static DateTimeOffset? GetCreationDate([NotNull] this ClaimsPrincipal principal)
+        public static DateTimeOffset? GetCreationDate(this ClaimsPrincipal principal)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
-            var claim = principal.FindFirst(Claims.IssuedAt);
-            if (claim == null)
+            var claim = principal.FindFirst(Claims.Private.CreationDate);
+            if (claim is null)
             {
                 return null;
             }
 
-            if (!long.TryParse(claim.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            if (!DateTimeOffset.TryParseExact(claim.Value, "r", CultureInfo.InvariantCulture, DateTimeStyles.None, out var value))
             {
                 return null;
             }
 
-            return DateTimeOffset.FromUnixTimeSeconds(value);
+            return value;
         }
 
         /// <summary>
@@ -1047,25 +1175,25 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The expiration date or <c>null</c> if the claim cannot be found.</returns>
-        public static DateTimeOffset? GetExpirationDate([NotNull] this ClaimsPrincipal principal)
+        public static DateTimeOffset? GetExpirationDate(this ClaimsPrincipal principal)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
-            var claim = principal.FindFirst(Claims.ExpiresAt);
-            if (claim == null)
+            var claim = principal.FindFirst(Claims.Private.ExpirationDate);
+            if (claim is null)
             {
                 return null;
             }
 
-            if (!long.TryParse(claim.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            if (!DateTimeOffset.TryParseExact(claim.Value, "r", CultureInfo.InvariantCulture, DateTimeStyles.None, out var value))
             {
                 return null;
             }
 
-            return DateTimeOffset.FromUnixTimeSeconds(value);
+            return value;
         }
 
         /// <summary>
@@ -1073,286 +1201,104 @@ namespace OpenIddict.Abstractions
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The audiences list or an empty set if the claims cannot be found.</returns>
-        public static ImmutableHashSet<string> GetAudiences([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return ImmutableHashSet.CreateRange(StringComparer.Ordinal, principal.GetClaims(Claims.Audience));
-        }
+        public static ImmutableArray<string> GetAudiences(this ClaimsPrincipal principal)
+            => principal.GetClaims(Claims.Private.Audience);
 
         /// <summary>
         /// Gets the presenters list stored in the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The presenters list or an empty set if the claims cannot be found.</returns>
-        public static ImmutableHashSet<string> GetPresenters([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return ImmutableHashSet.CreateRange(StringComparer.Ordinal, principal.GetClaims(Claims.AuthorizedParty));
-        }
+        public static ImmutableArray<string> GetPresenters(this ClaimsPrincipal principal)
+            => principal.GetClaims(Claims.Private.Presenter);
 
         /// <summary>
         /// Gets the resources list stored in the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The resources list or an empty set if the claims cannot be found.</returns>
-        public static ImmutableHashSet<string> GetResources([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return ImmutableHashSet.CreateRange(StringComparer.Ordinal, principal.GetClaims(Claims.Resource));
-        }
+        public static ImmutableArray<string> GetResources(this ClaimsPrincipal principal)
+            => principal.GetClaims(Claims.Private.Resource);
 
         /// <summary>
         /// Gets the scopes list stored in the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The scopes list or an empty set if the claim cannot be found.</returns>
-        public static ImmutableHashSet<string> GetScopes([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            // Note: scopes are deliberately formatted as a single space-separated
-            // string to respect the usual representation of the standard scope claim.
-            // See https://tools.ietf.org/html/draft-ietf-oauth-access-token-jwt-02.
-            var value = principal.GetClaim(Claims.Scope);
-            if (string.IsNullOrEmpty(value))
-            {
-                return ImmutableHashSet.Create<string>(StringComparer.Ordinal);
-            }
-
-            return ImmutableHashSet.CreateRange(StringComparer.Ordinal, GetValues(value, Separators.Space));
-        }
+        public static ImmutableArray<string> GetScopes(this ClaimsPrincipal principal)
+            => principal.GetClaims(Claims.Private.Scope);
 
         /// <summary>
         /// Gets the access token lifetime associated with the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The access token lifetime or <c>null</c> if the claim cannot be found.</returns>
-
-        public static TimeSpan? GetAccessTokenLifetime([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            var value = principal.GetClaim(Claims.Private.AccessTokenLifetime);
-            if (string.IsNullOrEmpty(value))
-            {
-                return null;
-            }
-
-            if (double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double result))
-            {
-                return TimeSpan.FromSeconds(result);
-            }
-
-            return null;
-        }
+        public static TimeSpan? GetAccessTokenLifetime(this ClaimsPrincipal principal)
+            => GetLifetime(principal, Claims.Private.AccessTokenLifetime);
 
         /// <summary>
         /// Gets the authorization code lifetime associated with the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The authorization code lifetime or <c>null</c> if the claim cannot be found.</returns>
+        public static TimeSpan? GetAuthorizationCodeLifetime(this ClaimsPrincipal principal)
+            => GetLifetime(principal, Claims.Private.AuthorizationCodeLifetime);
 
-        public static TimeSpan? GetAuthorizationCodeLifetime([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            var value = principal.GetClaim(Claims.Private.AuthorizationCodeLifetime);
-            if (string.IsNullOrEmpty(value))
-            {
-                return null;
-            }
-
-            if (double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double result))
-            {
-                return TimeSpan.FromSeconds(result);
-            }
-
-            return null;
-        }
+        /// <summary>
+        /// Gets the device code lifetime associated with the claims principal.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <returns>The device code lifetime or <c>null</c> if the claim cannot be found.</returns>
+        public static TimeSpan? GetDeviceCodeLifetime(this ClaimsPrincipal principal)
+            => GetLifetime(principal, Claims.Private.DeviceCodeLifetime);
 
         /// <summary>
         /// Gets the identity token lifetime associated with the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The identity token lifetime or <c>null</c> if the claim cannot be found.</returns>
-
-        public static TimeSpan? GetIdentityTokenLifetime([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            var value = principal.GetClaim(Claims.Private.IdentityTokenLifetime);
-            if (string.IsNullOrEmpty(value))
-            {
-                return null;
-            }
-
-            if (double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double result))
-            {
-                return TimeSpan.FromSeconds(result);
-            }
-
-            return null;
-        }
+        public static TimeSpan? GetIdentityTokenLifetime(this ClaimsPrincipal principal)
+            => GetLifetime(principal, Claims.Private.IdentityTokenLifetime);
 
         /// <summary>
         /// Gets the refresh token lifetime associated with the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The refresh token lifetime or <c>null</c> if the claim cannot be found.</returns>
-
-        public static TimeSpan? GetRefreshTokenLifetime([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            var value = principal.GetClaim(Claims.Private.RefreshTokenLifetime);
-            if (string.IsNullOrEmpty(value))
-            {
-                return null;
-            }
-
-            if (double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double result))
-            {
-                return TimeSpan.FromSeconds(result);
-            }
-
-            return null;
-        }
+        public static TimeSpan? GetRefreshTokenLifetime(this ClaimsPrincipal principal)
+            => GetLifetime(principal, Claims.Private.RefreshTokenLifetime);
 
         /// <summary>
-        /// Gets the unique identifier associated with the claims principal.
+        /// Gets the user code lifetime associated with the claims principal.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <returns>The user code lifetime or <c>null</c> if the claim cannot be found.</returns>
+        public static TimeSpan? GetUserCodeLifetime(this ClaimsPrincipal principal)
+            => GetLifetime(principal, Claims.Private.UserCodeLifetime);
+
+        /// <summary>
+        /// Gets the internal authorization identifier associated with the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <returns>The unique identifier or <c>null</c> if the claim cannot be found.</returns>
-        public static string GetTokenId([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.GetClaim(Claims.JwtId);
-        }
+        public static string? GetAuthorizationId(this ClaimsPrincipal principal)
+            => principal.GetClaim(Claims.Private.AuthorizationId);
 
         /// <summary>
-        /// Gets the token usage associated with the claims principal.
+        /// Gets the internal token identifier associated with the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
-        /// <returns>The token usage or <c>null</c> if the claim cannot be found.</returns>
-        public static string GetTokenUsage([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.GetClaim(Claims.Private.TokenUsage);
-        }
+        /// <returns>The unique identifier or <c>null</c> if the claim cannot be found.</returns>
+        public static string? GetTokenId(this ClaimsPrincipal principal)
+            => principal.GetClaim(Claims.Private.TokenId);
 
         /// <summary>
-        /// Gets a boolean value indicating whether the
-        /// claims principal corresponds to an access token.
+        /// Gets the token type associated with the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
-        /// <returns><c>true</c> if the principal corresponds to an access token.</returns>
-        public static bool IsAccessToken([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return string.Equals(principal.GetTokenUsage(), TokenUsages.AccessToken, StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// Gets a boolean value indicating whether the
-        /// claims principal corresponds to an access token.
-        /// </summary>
-        /// <param name="principal">The claims principal.</param>
-        /// <returns><c>true</c> if the principal corresponds to an authorization code.</returns>
-        public static bool IsAuthorizationCode([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return string.Equals(principal.GetTokenUsage(), TokenUsages.AuthorizationCode, StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// Gets a boolean value indicating whether the
-        /// claims principal corresponds to an identity token.
-        /// </summary>
-        /// <param name="principal">The claims principal.</param>
-        /// <returns><c>true</c> if the principal corresponds to an identity token.</returns>
-        public static bool IsIdentityToken([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return string.Equals(principal.GetTokenUsage(), TokenUsages.IdToken, StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// Gets a boolean value indicating whether the
-        /// claims principal corresponds to a refresh token.
-        /// </summary>
-        /// <param name="principal">The claims principal.</param>
-        /// <returns><c>true</c> if the principal corresponds to a refresh token.</returns>
-        public static bool IsRefreshToken([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return string.Equals(principal.GetTokenUsage(), TokenUsages.RefreshToken, StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// Determines whether the claims principal contains at least one audience.
-        /// </summary>
-        /// <param name="principal">The claims principal.</param>
-        /// <returns><c>true</c> if the principal contains at least one audience.</returns>
-        public static bool HasAudience([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.FindAll(Claims.Audience).Any();
-        }
+        /// <returns>The token type or <c>null</c> if the claim cannot be found.</returns>
+        public static string? GetTokenType(this ClaimsPrincipal principal)
+            => principal.GetClaim(Claims.Private.TokenType);
 
         /// <summary>
         /// Determines whether the claims principal contains the given audience.
@@ -1360,34 +1306,19 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="audience">The audience.</param>
         /// <returns><c>true</c> if the principal contains the given audience.</returns>
-        public static bool HasAudience([NotNull] this ClaimsPrincipal principal, [NotNull] string audience)
+        public static bool HasAudience(this ClaimsPrincipal principal, string audience)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
             if (string.IsNullOrEmpty(audience))
             {
-                throw new ArgumentException("The audience cannot be null or empty.", nameof(audience));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0186), nameof(audience));
             }
 
-            return principal.GetAudiences().Contains(audience);
-        }
-
-        /// <summary>
-        /// Determines whether the claims principal contains at least one presenter.
-        /// </summary>
-        /// <param name="principal">The claims principal.</param>
-        /// <returns><c>true</c> if the principal contains at least one presenter.</returns>
-        public static bool HasPresenter([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.FindAll(Claims.AuthorizedParty).Any();
+            return principal.HasClaim(Claims.Private.Audience, audience);
         }
 
         /// <summary>
@@ -1396,34 +1327,19 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="presenter">The presenter.</param>
         /// <returns><c>true</c> if the principal contains the given presenter.</returns>
-        public static bool HasPresenter([NotNull] this ClaimsPrincipal principal, [NotNull] string presenter)
+        public static bool HasPresenter(this ClaimsPrincipal principal, string presenter)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
             if (string.IsNullOrEmpty(presenter))
             {
-                throw new ArgumentException("The presenter cannot be null or empty.", nameof(presenter));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0187), nameof(presenter));
             }
 
-            return principal.GetPresenters().Contains(presenter);
-        }
-
-        /// <summary>
-        /// Determines whether the claims principal contains at least one resource.
-        /// </summary>
-        /// <param name="principal">The claims principal.</param>
-        /// <returns><c>true</c> if the principal contains at least one resource.</returns>
-        public static bool HasResource([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.FindAll(Claims.Resource).Any();
+            return principal.HasClaim(Claims.Private.Presenter, presenter);
         }
 
         /// <summary>
@@ -1432,34 +1348,19 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="resource">The resource.</param>
         /// <returns><c>true</c> if the principal contains the given resource.</returns>
-        public static bool HasResource([NotNull] this ClaimsPrincipal principal, [NotNull] string resource)
+        public static bool HasResource(this ClaimsPrincipal principal, string resource)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
             if (string.IsNullOrEmpty(resource))
             {
-                throw new ArgumentException("The resource cannot be null or empty.", nameof(resource));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0062), nameof(resource));
             }
 
-            return principal.GetResources().Contains(resource);
-        }
-
-        /// <summary>
-        /// Determines whether the claims principal contains at least one scope.
-        /// </summary>
-        /// <param name="principal">The claims principal.</param>
-        /// <returns><c>true</c> if the principal contains at least one scope.</returns>
-        public static bool HasScope([NotNull] this ClaimsPrincipal principal)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.FindAll(Claims.Scope).Any();
+            return principal.HasClaim(Claims.Private.Resource, resource);
         }
 
         /// <summary>
@@ -1468,19 +1369,40 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="scope">The scope.</param>
         /// <returns><c>true</c> if the principal contains the given scope.</returns>
-        public static bool HasScope([NotNull] this ClaimsPrincipal principal, [NotNull] string scope)
+        public static bool HasScope(this ClaimsPrincipal principal, string scope)
         {
-            if (principal == null)
+            if (principal is null)
             {
                 throw new ArgumentNullException(nameof(principal));
             }
 
             if (string.IsNullOrEmpty(scope))
             {
-                throw new ArgumentException("The scope cannot be null or empty.", nameof(scope));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0180), nameof(scope));
             }
 
-            return principal.GetScopes().Contains(scope);
+            return principal.HasClaim(Claims.Private.Scope, scope);
+        }
+
+        /// <summary>
+        /// Determines whether the token type associated with the claims principal matches the specified type.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="type">The token type.</param>
+        /// <returns><c>true</c> if the token type matches the specified type.</returns>
+        public static bool HasTokenType(this ClaimsPrincipal principal, string type)
+        {
+            if (principal is null)
+            {
+                throw new ArgumentNullException(nameof(principal));
+            }
+
+            if (string.IsNullOrEmpty(type))
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0188), nameof(type));
+            }
+
+            return string.Equals(principal.GetTokenType(), type, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -1489,23 +1411,8 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="date">The creation date</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetCreationDate([NotNull] this ClaimsPrincipal principal, [CanBeNull] DateTimeOffset? date)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            principal.RemoveClaims(Claims.IssuedAt);
-
-            if (date.HasValue)
-            {
-                var claim = new Claim(Claims.IssuedAt, date?.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture), ClaimValueTypes.Integer64);
-                ((ClaimsIdentity) principal.Identity).AddClaim(claim);
-            }
-
-            return principal;
-        }
+        public static ClaimsPrincipal SetCreationDate(this ClaimsPrincipal principal, DateTimeOffset? date)
+            => principal.SetClaim(Claims.Private.CreationDate, date?.ToString("r", CultureInfo.InvariantCulture));
 
         /// <summary>
         /// Sets the expiration date in the claims principal.
@@ -1513,23 +1420,8 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="date">The expiration date</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetExpirationDate([NotNull] this ClaimsPrincipal principal, [CanBeNull] DateTimeOffset? date)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            principal.RemoveClaims(Claims.ExpiresAt);
-
-            if (date.HasValue)
-            {
-                var claim = new Claim(Claims.ExpiresAt, date?.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture), ClaimValueTypes.Integer64);
-                ((ClaimsIdentity) principal.Identity).AddClaim(claim);
-            }
-
-            return principal;
-        }
+        public static ClaimsPrincipal SetExpirationDate(this ClaimsPrincipal principal, DateTimeOffset? date)
+            => principal.SetClaim(Claims.Private.ExpirationDate, date?.ToString("r", CultureInfo.InvariantCulture));
 
         /// <summary>
         /// Sets the audiences list in the claims principal.
@@ -1538,17 +1430,8 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="audiences">The audiences to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetAudiences(
-            [NotNull] this ClaimsPrincipal principal,
-            [CanBeNull] IEnumerable<string> audiences)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.SetClaims(Claims.Audience, audiences.Distinct(StringComparer.Ordinal));
-        }
+        public static ClaimsPrincipal SetAudiences(this ClaimsPrincipal principal, ImmutableArray<string> audiences)
+            => principal.SetClaims(Claims.Private.Audience, audiences);
 
         /// <summary>
         /// Sets the audiences list in the claims principal.
@@ -1557,11 +1440,18 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="audiences">The audiences to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetAudiences(
-            [NotNull] this ClaimsPrincipal principal, [CanBeNull] params string[] audiences)
-            // Note: guarding the audiences parameter against null values
-            // is not necessary as AsEnumerable() doesn't throw on null values.
-            => principal.SetAudiences(audiences.AsEnumerable());
+        public static ClaimsPrincipal SetAudiences(this ClaimsPrincipal principal, IEnumerable<string>? audiences)
+            => principal.SetAudiences(audiences?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+
+        /// <summary>
+        /// Sets the audiences list in the claims principal.
+        /// Note: this method automatically excludes duplicate audiences.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="audiences">The audiences to store.</param>
+        /// <returns>The claims principal.</returns>
+        public static ClaimsPrincipal SetAudiences(this ClaimsPrincipal principal, params string[]? audiences)
+            => principal.SetAudiences(audiences?.ToImmutableArray() ?? ImmutableArray.Create<string>());
 
         /// <summary>
         /// Sets the presenters list in the claims principal.
@@ -1570,17 +1460,8 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="presenters">The presenters to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetPresenters(
-            [NotNull] this ClaimsPrincipal principal,
-            [CanBeNull] IEnumerable<string> presenters)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.SetClaims(Claims.AuthorizedParty, presenters.Distinct(StringComparer.Ordinal));
-        }
+        public static ClaimsPrincipal SetPresenters(this ClaimsPrincipal principal, ImmutableArray<string> presenters)
+            => principal.SetClaims(Claims.Private.Presenter, presenters);
 
         /// <summary>
         /// Sets the presenters list in the claims principal.
@@ -1589,11 +1470,18 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="presenters">The presenters to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetPresenters(
-            [NotNull] this ClaimsPrincipal principal, [CanBeNull] params string[] presenters)
-            // Note: guarding the presenters parameter against null values
-            // is not necessary as AsEnumerable() doesn't throw on null values.
-            => principal.SetPresenters(presenters.AsEnumerable());
+        public static ClaimsPrincipal SetPresenters(this ClaimsPrincipal principal, IEnumerable<string>? presenters)
+            => principal.SetPresenters(presenters?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+
+        /// <summary>
+        /// Sets the presenters list in the claims principal.
+        /// Note: this method automatically excludes duplicate presenters.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="presenters">The presenters to store.</param>
+        /// <returns>The claims principal.</returns>
+        public static ClaimsPrincipal SetPresenters(this ClaimsPrincipal principal, params string[]? presenters)
+            => principal.SetPresenters(presenters?.ToImmutableArray() ?? ImmutableArray.Create<string>());
 
         /// <summary>
         /// Sets the resources list in the claims principal.
@@ -1602,17 +1490,8 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="resources">The resources to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetResources(
-            [NotNull] this ClaimsPrincipal principal,
-            [CanBeNull] IEnumerable<string> resources)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.SetClaims(Claims.Resource, resources.Distinct(StringComparer.Ordinal));
-        }
+        public static ClaimsPrincipal SetResources(this ClaimsPrincipal principal, ImmutableArray<string> resources)
+            => principal.SetClaims(Claims.Private.Resource, resources);
 
         /// <summary>
         /// Sets the resources list in the claims principal.
@@ -1621,11 +1500,18 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="resources">The resources to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetResources(
-            [NotNull] this ClaimsPrincipal principal, [CanBeNull] params string[] resources)
-            // Note: guarding the resources parameter against null values
-            // is not necessary as AsEnumerable() doesn't throw on null values.
-            => principal.SetResources(resources.AsEnumerable());
+        public static ClaimsPrincipal SetResources(this ClaimsPrincipal principal, IEnumerable<string>? resources)
+            => principal.SetResources(resources?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+
+        /// <summary>
+        /// Sets the resources list in the claims principal.
+        /// Note: this method automatically excludes duplicate resources.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="resources">The resources to store.</param>
+        /// <returns>The claims principal.</returns>
+        public static ClaimsPrincipal SetResources(this ClaimsPrincipal principal, params string[]? resources)
+            => principal.SetResources(resources?.ToImmutableArray() ?? ImmutableArray.Create<string>());
 
         /// <summary>
         /// Sets the scopes list in the claims principal.
@@ -1634,24 +1520,8 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="scopes">The scopes to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetScopes(
-            [NotNull] this ClaimsPrincipal principal, [CanBeNull] IEnumerable<string> scopes)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            if (scopes == null)
-            {
-                return principal.RemoveClaims(Claims.Scope);
-            }
-
-            // Note: scopes are deliberately formatted as a single space-separated
-            // string to respect the usual representation of the standard scope claim.
-            // See https://tools.ietf.org/html/draft-ietf-oauth-access-token-jwt-02.
-            return principal.SetClaim(Claims.Scope, string.Join(" ", scopes.Distinct(StringComparer.Ordinal)));
-        }
+        public static ClaimsPrincipal SetScopes(this ClaimsPrincipal principal, ImmutableArray<string> scopes)
+            => principal.SetClaims(Claims.Private.Scope, scopes);
 
         /// <summary>
         /// Sets the scopes list in the claims principal.
@@ -1660,11 +1530,18 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="scopes">The scopes to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetScopes(
-            [NotNull] this ClaimsPrincipal principal, [CanBeNull] params string[] scopes)
-            // Note: guarding the scopes parameter against null values
-            // is not necessary as AsEnumerable() doesn't throw on null values.
-            => principal.SetScopes(scopes.AsEnumerable());
+        public static ClaimsPrincipal SetScopes(this ClaimsPrincipal principal, IEnumerable<string>? scopes)
+            => principal.SetScopes(scopes?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+
+        /// <summary>
+        /// Sets the scopes list in the claims principal.
+        /// Note: this method automatically excludes duplicate scopes.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="scopes">The scopes to store.</param>
+        /// <returns>The claims principal.</returns>
+        public static ClaimsPrincipal SetScopes(this ClaimsPrincipal principal, params string[]? scopes)
+            => principal.SetScopes(scopes?.ToImmutableArray() ?? ImmutableArray.Create<string>());
 
         /// <summary>
         /// Sets the access token lifetime associated with the claims principal.
@@ -1672,15 +1549,8 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="lifetime">The access token lifetime to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetAccessTokenLifetime([NotNull] this ClaimsPrincipal principal, TimeSpan? lifetime)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.SetClaim(Claims.Private.AccessTokenLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
-        }
+        public static ClaimsPrincipal SetAccessTokenLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
+            => principal.SetClaim(Claims.Private.AccessTokenLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
 
         /// <summary>
         /// Sets the authorization code lifetime associated with the claims principal.
@@ -1688,15 +1558,17 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="lifetime">The authorization code lifetime to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetAuthorizationCodeLifetime([NotNull] this ClaimsPrincipal principal, TimeSpan? lifetime)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
+        public static ClaimsPrincipal SetAuthorizationCodeLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
+            => principal.SetClaim(Claims.Private.AuthorizationCodeLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
 
-            return principal.SetClaim(Claims.Private.AuthorizationCodeLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
-        }
+        /// <summary>
+        /// Sets the device code lifetime associated with the claims principal.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="lifetime">The device code lifetime to store.</param>
+        /// <returns>The claims principal.</returns>
+        public static ClaimsPrincipal SetDeviceCodeLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
+            => principal.SetClaim(Claims.Private.DeviceCodeLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
 
         /// <summary>
         /// Sets the identity token lifetime associated with the claims principal.
@@ -1704,15 +1576,8 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="lifetime">The identity token lifetime to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetIdentityTokenLifetime([NotNull] this ClaimsPrincipal principal, TimeSpan? lifetime)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.SetClaim(Claims.Private.IdentityTokenLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
-        }
+        public static ClaimsPrincipal SetIdentityTokenLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
+            => principal.SetClaim(Claims.Private.IdentityTokenLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
 
         /// <summary>
         /// Sets the refresh token lifetime associated with the claims principal.
@@ -1720,36 +1585,55 @@ namespace OpenIddict.Abstractions
         /// <param name="principal">The claims principal.</param>
         /// <param name="lifetime">The refresh token lifetime to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetRefreshTokenLifetime([NotNull] this ClaimsPrincipal principal, TimeSpan? lifetime)
-        {
-            if (principal == null)
-            {
-                throw new ArgumentNullException(nameof(principal));
-            }
-
-            return principal.SetClaim(Claims.Private.RefreshTokenLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
-        }
+        public static ClaimsPrincipal SetRefreshTokenLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
+            => principal.SetClaim(Claims.Private.RefreshTokenLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
 
         /// <summary>
-        /// Sets the unique identifier associated with the claims principal.
+        /// Sets the user code lifetime associated with the claims principal.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="lifetime">The user code lifetime to store.</param>
+        /// <returns>The claims principal.</returns>
+        public static ClaimsPrincipal SetUserCodeLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
+            => principal.SetClaim(Claims.Private.UserCodeLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
+
+        /// <summary>
+        /// Sets the internal authorization identifier associated with the claims principal.
         /// </summary>
         /// <param name="principal">The claims principal.</param>
         /// <param name="identifier">The unique identifier to store.</param>
         /// <returns>The claims principal.</returns>
-        public static ClaimsPrincipal SetTokenId([NotNull] this ClaimsPrincipal principal, string identifier)
+        public static ClaimsPrincipal SetAuthorizationId(this ClaimsPrincipal principal, string? identifier)
+            => principal.SetClaim(Claims.Private.AuthorizationId, identifier);
+
+        /// <summary>
+        /// Sets the internal token identifier associated with the claims principal.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="identifier">The unique identifier to store.</param>
+        /// <returns>The claims principal.</returns>
+        public static ClaimsPrincipal SetTokenId(this ClaimsPrincipal principal, string? identifier)
+            => principal.SetClaim(Claims.Private.TokenId, identifier);
+
+        /// <summary>
+        /// Sets the token type associated with the claims principal.
+        /// </summary>
+        /// <param name="principal">The claims principal.</param>
+        /// <param name="type">The token type to store.</param>
+        /// <returns>The claims principal.</returns>
+        public static ClaimsPrincipal SetTokenType(this ClaimsPrincipal principal, string? type)
+            => principal.SetClaim(Claims.Private.TokenType, type);
+
+        private static ImmutableArray<string> GetValues(string? source, char[] separators)
         {
-            if (principal == null)
+            Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
+
+            if (string.IsNullOrEmpty(source))
             {
-                throw new ArgumentNullException(nameof(principal));
+                return ImmutableArray.Create<string>();
             }
 
-            return principal.SetClaim(Claims.JwtId, identifier);
-        }
-
-        private static IEnumerable<string> GetValues(string source, char[] separators)
-        {
-            Debug.Assert(!string.IsNullOrEmpty(source), "The source string shouldn't be null or empty.");
-            Debug.Assert(separators?.Length != 0, "The separators collection shouldn't be null or empty.");
+            var builder = ImmutableArray.CreateBuilder<string>();
 
             foreach (var element in new StringTokenizer(source, separators))
             {
@@ -1759,17 +1643,26 @@ namespace OpenIddict.Abstractions
                     continue;
                 }
 
-                yield return segment.Value;
+                if (builder.Contains(segment.Value, StringComparer.Ordinal))
+                {
+                    continue;
+                }
+
+                builder.Add(segment.Value);
             }
 
-            yield break;
+            return builder.ToImmutable();
         }
 
-        private static bool HasValue(string source, string value, char[] separators)
+        private static bool HasValue(string? source, string value, char[] separators)
         {
-            Debug.Assert(!string.IsNullOrEmpty(source), "The source string shouldn't be null or empty.");
-            Debug.Assert(!string.IsNullOrEmpty(value), "The value string shouldn't be null or empty.");
-            Debug.Assert(separators?.Length != 0, "The separators collection shouldn't be null or empty.");
+            Debug.Assert(!string.IsNullOrEmpty(value), SR.GetResourceString(SR.ID4002));
+            Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
+
+            if (string.IsNullOrEmpty(source))
+            {
+                return false;
+            }
 
             foreach (var element in new StringTokenizer(source, separators))
             {
@@ -1790,7 +1683,7 @@ namespace OpenIddict.Abstractions
 
         private static StringSegment TrimStart(StringSegment segment, char[] separators)
         {
-            Debug.Assert(separators?.Length != 0, "The separators collection shouldn't be null or empty.");
+            Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
 
             var index = segment.Offset;
 
@@ -1809,7 +1702,7 @@ namespace OpenIddict.Abstractions
 
         private static StringSegment TrimEnd(StringSegment segment, char[] separators)
         {
-            Debug.Assert(separators?.Length != 0, "The separators collection shouldn't be null or empty.");
+            Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
 
             var index = segment.Offset + segment.Length - 1;
 
@@ -1828,16 +1721,16 @@ namespace OpenIddict.Abstractions
 
         private static StringSegment Trim(StringSegment segment, char[] separators)
         {
-            Debug.Assert(separators?.Length != 0, "The separators collection shouldn't be null or empty.");
+            Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
 
             return TrimEnd(TrimStart(segment, separators), separators);
         }
 
         private static bool IsSeparator(char character, char[] separators)
         {
-            Debug.Assert(separators?.Length != 0, "The separators collection shouldn't be null or empty.");
+            Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
 
-            for (var index = 0; index < separators.Length; index++)
+            for (var index = 0; index < separators!.Length; index++)
             {
                 if (character == separators[index])
                 {
@@ -1846,6 +1739,27 @@ namespace OpenIddict.Abstractions
             }
 
             return false;
+        }
+
+        private static TimeSpan? GetLifetime(ClaimsPrincipal principal, string type)
+        {
+            if (principal is null)
+            {
+                throw new ArgumentNullException(nameof(principal));
+            }
+
+            var value = principal.GetClaim(type);
+            if (string.IsNullOrEmpty(value))
+            {
+                return null;
+            }
+
+            if (double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double result))
+            {
+                return TimeSpan.FromSeconds(result);
+            }
+
+            return null;
         }
     }
 }

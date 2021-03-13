@@ -6,18 +6,18 @@
 
 using System;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
-using JetBrains.Annotations;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
-using OpenIddict.Abstractions;
 using OpenIddict.Server;
+using static OpenIddict.Abstractions.OpenIddictConstants;
+using SR = OpenIddict.Abstractions.OpenIddictResources;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
@@ -30,7 +30,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// Initializes a new instance of <see cref="OpenIddictServerBuilder"/>.
         /// </summary>
         /// <param name="services">The services collection.</param>
-        public OpenIddictServerBuilder([NotNull] IServiceCollection services)
+        public OpenIddictServerBuilder(IServiceCollection services)
             => Services = services ?? throw new ArgumentNullException(nameof(services));
 
         /// <summary>
@@ -47,15 +47,18 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         [EditorBrowsable(EditorBrowsableState.Advanced)]
         public OpenIddictServerBuilder AddEventHandler<TContext>(
-            [NotNull] Action<OpenIddictServerHandlerDescriptor.Builder<TContext>> configuration)
+            Action<OpenIddictServerHandlerDescriptor.Builder<TContext>> configuration)
             where TContext : OpenIddictServerEvents.BaseContext
         {
-            if (configuration == null)
+            if (configuration is null)
             {
                 throw new ArgumentNullException(nameof(configuration));
             }
 
-            var builder = OpenIddictServerHandlerDescriptor.CreateBuilder<TContext>();
+            // Note: handlers registered using this API are assumed to be custom handlers by default.
+            var builder = OpenIddictServerHandlerDescriptor.CreateBuilder<TContext>()
+                .SetType(OpenIddictServerHandlerType.Custom);
+
             configuration(builder);
 
             return AddEventHandler(builder.Build());
@@ -67,9 +70,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="descriptor">The handler descriptor.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         [EditorBrowsable(EditorBrowsableState.Advanced)]
-        public OpenIddictServerBuilder AddEventHandler([NotNull] OpenIddictServerHandlerDescriptor descriptor)
+        public OpenIddictServerBuilder AddEventHandler(OpenIddictServerHandlerDescriptor descriptor)
         {
-            if (descriptor == null)
+            if (descriptor is null)
             {
                 throw new ArgumentNullException(nameof(descriptor));
             }
@@ -77,7 +80,7 @@ namespace Microsoft.Extensions.DependencyInjection
             // Register the handler in the services collection.
             Services.Add(descriptor.ServiceDescriptor);
 
-            return Configure(options => options.CustomHandlers.Add(descriptor));
+            return Configure(options => options.Handlers.Add(descriptor));
         }
 
         /// <summary>
@@ -86,9 +89,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="descriptor">The descriptor corresponding to the handler to remove.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         [EditorBrowsable(EditorBrowsableState.Advanced)]
-        public OpenIddictServerBuilder RemoveEventHandler([NotNull] OpenIddictServerHandlerDescriptor descriptor)
+        public OpenIddictServerBuilder RemoveEventHandler(OpenIddictServerHandlerDescriptor descriptor)
         {
-            if (descriptor == null)
+            if (descriptor is null)
             {
                 throw new ArgumentNullException(nameof(descriptor));
             }
@@ -97,19 +100,11 @@ namespace Microsoft.Extensions.DependencyInjection
 
             Services.PostConfigure<OpenIddictServerOptions>(options =>
             {
-                for (var index = options.CustomHandlers.Count - 1; index >= 0; index--)
+                for (var index = options.Handlers.Count - 1; index >= 0; index--)
                 {
-                    if (options.CustomHandlers[index].ServiceDescriptor.ServiceType == descriptor.ServiceDescriptor.ServiceType)
+                    if (options.Handlers[index].ServiceDescriptor.ServiceType == descriptor.ServiceDescriptor.ServiceType)
                     {
-                        options.CustomHandlers.RemoveAt(index);
-                    }
-                }
-
-                for (var index = options.DefaultHandlers.Count - 1; index >= 0; index--)
-                {
-                    if (options.DefaultHandlers[index].ServiceDescriptor.ServiceType == descriptor.ServiceDescriptor.ServiceType)
-                    {
-                        options.DefaultHandlers.RemoveAt(index);
+                        options.Handlers.RemoveAt(index);
                     }
                 }
             });
@@ -123,9 +118,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="configuration">The delegate used to configure the OpenIddict options.</param>
         /// <remarks>This extension can be safely called multiple times.</remarks>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder Configure([NotNull] Action<OpenIddictServerOptions> configuration)
+        public OpenIddictServerBuilder Configure(Action<OpenIddictServerOptions> configuration)
         {
-            if (configuration == null)
+            if (configuration is null)
             {
                 throw new ArgumentNullException(nameof(configuration));
             }
@@ -145,13 +140,13 @@ namespace Microsoft.Extensions.DependencyInjection
             => Configure(options => options.AcceptAnonymousClients = true);
 
         /// <summary>
-        /// Registers the <see cref="EncryptingCredentials"/> used to encrypt the tokens issued by OpenIddict.
+        /// Registers encryption credentials.
         /// </summary>
         /// <param name="credentials">The encrypting credentials.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEncryptionCredentials([NotNull] EncryptingCredentials credentials)
+        public OpenIddictServerBuilder AddEncryptionCredentials(EncryptingCredentials credentials)
         {
-            if (credentials == null)
+            if (credentials is null)
             {
                 throw new ArgumentNullException(nameof(credentials));
             }
@@ -160,13 +155,13 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Registers a <see cref="SecurityKey"/> used to encrypt the access tokens issued by OpenIddict.
+        /// Registers an encryption key.
         /// </summary>
         /// <param name="key">The security key.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEncryptionKey([NotNull] SecurityKey key)
+        public OpenIddictServerBuilder AddEncryptionKey(SecurityKey key)
         {
-            if (key == null)
+            if (key is null)
             {
                 throw new ArgumentNullException(nameof(key));
             }
@@ -175,47 +170,46 @@ namespace Microsoft.Extensions.DependencyInjection
             if (key is AsymmetricSecurityKey asymmetricSecurityKey &&
                 asymmetricSecurityKey.PrivateKeyStatus == PrivateKeyStatus.DoesNotExist)
             {
-                throw new InvalidOperationException("The asymmetric encryption key doesn't contain the required private key.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0055));
             }
 
-            if (IsAlgorithmSupported(key, SecurityAlgorithms.Aes256KW))
+            if (key.IsSupportedAlgorithm(SecurityAlgorithms.Aes256KW))
             {
+                if (key.KeySize != 256)
+                {
+                    throw new InvalidOperationException(SR.FormatID0283(256, key.KeySize));
+                }
+
                 return AddEncryptionCredentials(new EncryptingCredentials(key,
                     SecurityAlgorithms.Aes256KW, SecurityAlgorithms.Aes256CbcHmacSha512));
             }
 
-            if (IsAlgorithmSupported(key, SecurityAlgorithms.RsaOAEP))
+            if (key.IsSupportedAlgorithm(SecurityAlgorithms.RsaOAEP))
             {
                 return AddEncryptionCredentials(new EncryptingCredentials(key,
                     SecurityAlgorithms.RsaOAEP, SecurityAlgorithms.Aes256CbcHmacSha512));
             }
 
-            throw new InvalidOperationException(new StringBuilder()
-                .AppendLine("An encryption algorithm cannot be automatically inferred from the encrypting key.")
-                .Append("Consider using 'options.AddEncryptionCredentials(EncryptingCredentials)' instead.")
-                .ToString());
-
-            static bool IsAlgorithmSupported(SecurityKey key, string algorithm) =>
-                key.CryptoProviderFactory.IsSupportedAlgorithm(algorithm, key);
+            throw new InvalidOperationException(SR.GetResourceString(SR.ID0056));
         }
 
         /// <summary>
-        /// Registers (and generates if necessary) a user-specific development
-        /// certificate used to encrypt the tokens issued by OpenIddict.
+        /// Registers (and generates if necessary) a user-specific development encryption certificate.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder AddDevelopmentEncryptionCertificate()
             => AddDevelopmentEncryptionCertificate(new X500DistinguishedName("CN=OpenIddict Server Encryption Certificate"));
 
         /// <summary>
-        /// Registers (and generates if necessary) a user-specific development
-        /// certificate used to encrypt the tokens issued by OpenIddict.
+        /// Registers (and generates if necessary) a user-specific development encryption certificate.
         /// </summary>
         /// <param name="subject">The subject name associated with the certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddDevelopmentEncryptionCertificate([NotNull] X500DistinguishedName subject)
+        [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+            Justification = "The X.509 certificate is attached to the server options.")]
+        public OpenIddictServerBuilder AddDevelopmentEncryptionCertificate(X500DistinguishedName subject)
         {
-            if (subject == null)
+            if (subject is null)
             {
                 throw new ArgumentNullException(nameof(subject));
             }
@@ -223,29 +217,21 @@ namespace Microsoft.Extensions.DependencyInjection
             using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
             store.Open(OpenFlags.ReadWrite);
 
-            // Try to retrieve the development certificate from the specified store.
-            // If a certificate was found but is not yet or no longer valid, remove it
-            // from the store before creating and persisting a new encryption certificate.
-            var certificate = store.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, subject.Name, validOnly: false)
+            // Try to retrieve the existing development certificates from the specified store.
+            // If no valid existing certificate was found, create a new encryption certificate.
+            var certificates = store.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, subject.Name, validOnly: false)
                 .OfType<X509Certificate2>()
-                .SingleOrDefault();
+                .ToList();
 
-            if (certificate != null && (certificate.NotBefore > DateTime.Now || certificate.NotAfter < DateTime.Now))
+            if (!certificates.Any(certificate => certificate.NotBefore < DateTime.Now && certificate.NotAfter > DateTime.Now))
             {
-                store.Remove(certificate);
-                certificate = null;
-            }
-
 #if SUPPORTS_CERTIFICATE_GENERATION
-            // If no appropriate certificate can be found, generate and persist a new certificate in the specified store.
-            if (certificate == null)
-            {
                 using var algorithm = RSA.Create(keySizeInBits: 2048);
 
                 var request = new CertificateRequest(subject, algorithm, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
                 request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyEncipherment, critical: true));
 
-                certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(2));
+                var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(2));
 
                 // Note: setting the friendly name is not supported on Unix machines (including Linux and macOS).
                 // To ensure an exception is not thrown by the property setter, an OS runtime check is used here.
@@ -271,7 +257,7 @@ namespace Microsoft.Extensions.DependencyInjection
                         flags |= X509KeyStorageFlags.Exportable;
                     }
 
-                    certificate = new X509Certificate2(data, string.Empty, flags);
+                    certificates.Insert(0, certificate = new X509Certificate2(data, string.Empty, flags));
                 }
 
                 finally
@@ -280,17 +266,20 @@ namespace Microsoft.Extensions.DependencyInjection
                 }
 
                 store.Add(certificate);
+#else
+                throw new PlatformNotSupportedException(SR.GetResourceString(SR.ID0264));
+#endif
             }
 
-            return AddEncryptionCertificate(certificate);
-#else
-            throw new PlatformNotSupportedException("X.509 certificate generation is not supported on this platform.");
-#endif
+            return Configure(options => options.EncryptionCredentials.AddRange(
+                from certificate in certificates
+                let key = new X509SecurityKey(certificate)
+                select new EncryptingCredentials(key, SecurityAlgorithms.RsaOAEP, SecurityAlgorithms.Aes256CbcHmacSha512)));
         }
 
         /// <summary>
-        /// Registers a new ephemeral key used to encrypt the tokens issued by OpenIddict: the key
-        /// is discarded when the application shuts down and tokens encrypted using this key are
+        /// Registers a new ephemeral encryption key. Ephemeral encryption keys are automatically
+        /// discarded when the application shuts down and payloads encrypted using this key are
         /// automatically invalidated. This method should only be used during development.
         /// On production, using a X.509 certificate stored in the machine store is recommended.
         /// </summary>
@@ -299,33 +288,33 @@ namespace Microsoft.Extensions.DependencyInjection
             => AddEphemeralEncryptionKey(SecurityAlgorithms.RsaOAEP);
 
         /// <summary>
-        /// Registers a new ephemeral key used to encrypt the tokens issued by OpenIddict: the key
-        /// is discarded when the application shuts down and tokens encrypted using this key are
+        /// Registers a new ephemeral encryption key. Ephemeral encryption keys are automatically
+        /// discarded when the application shuts down and payloads encrypted using this key are
         /// automatically invalidated. This method should only be used during development.
         /// On production, using a X.509 certificate stored in the machine store is recommended.
         /// </summary>
         /// <param name="algorithm">The algorithm associated with the encryption key.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEphemeralEncryptionKey([NotNull] string algorithm)
+        public OpenIddictServerBuilder AddEphemeralEncryptionKey(string algorithm)
         {
             if (string.IsNullOrEmpty(algorithm))
             {
-                throw new ArgumentException("The algorithm cannot be null or empty.", nameof(algorithm));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0057), nameof(algorithm));
             }
 
-            switch (algorithm)
+            return algorithm switch
             {
-                case SecurityAlgorithms.Aes256KW:
-                    return AddEncryptionCredentials(new EncryptingCredentials(CreateSymmetricSecurityKey(256),
-                        algorithm, SecurityAlgorithms.Aes256CbcHmacSha512));
+                SecurityAlgorithms.Aes256KW
+                    => AddEncryptionCredentials(new EncryptingCredentials(CreateSymmetricSecurityKey(256),
+                        algorithm, SecurityAlgorithms.Aes256CbcHmacSha512)),
 
-                case SecurityAlgorithms.RsaOAEP:
-                case SecurityAlgorithms.RsaOaepKeyWrap:
-                    return AddEncryptionCredentials(new EncryptingCredentials(CreateRsaSecurityKey(2048),
-                        algorithm, SecurityAlgorithms.Aes256CbcHmacSha512));
+                SecurityAlgorithms.RsaOAEP or
+                SecurityAlgorithms.RsaOaepKeyWrap
+                    => AddEncryptionCredentials(new EncryptingCredentials(CreateRsaSecurityKey(2048),
+                        algorithm, SecurityAlgorithms.Aes256CbcHmacSha512)),
 
-                default: throw new InvalidOperationException("The specified algorithm is not supported.");
-            }
+                _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0058)),
+            };
 
             static SymmetricSecurityKey CreateSymmetricSecurityKey(int size)
             {
@@ -341,6 +330,8 @@ namespace Microsoft.Extensions.DependencyInjection
                 return new SymmetricSecurityKey(data);
             }
 
+            [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+                Justification = "The generated RSA key is attached to the server options.")]
             static RsaSecurityKey CreateRsaSecurityKey(int size)
             {
 #if SUPPORTS_DIRECT_KEY_CREATION_WITH_SPECIFIED_SIZE
@@ -364,7 +355,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
                 if (algorithm.KeySize < size)
                 {
-                    throw new InvalidOperationException("RSA key generation failed.");
+                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0059));
                 }
 
                 return new RsaSecurityKey(algorithm);
@@ -373,45 +364,44 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> that is used to encrypt the tokens issued by OpenIddict.
+        /// Registers an encryption certificate.
         /// </summary>
-        /// <param name="certificate">The certificate used to encrypt the security tokens issued by the server.</param>
+        /// <param name="certificate">The encryption certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEncryptionCertificate([NotNull] X509Certificate2 certificate)
+        public OpenIddictServerBuilder AddEncryptionCertificate(X509Certificate2 certificate)
         {
-            if (certificate == null)
+            if (certificate is null)
             {
                 throw new ArgumentNullException(nameof(certificate));
             }
 
-            if (certificate.NotBefore > DateTime.Now)
+            // If the certificate is a X.509v3 certificate that specifies at least one
+            // key usage, ensure that the certificate key can be used for key encryption.
+            if (certificate.Version >= 3)
             {
-                throw new InvalidOperationException("The specified certificate is not yet valid.");
-            }
-
-            if (certificate.NotAfter < DateTime.Now)
-            {
-                throw new InvalidOperationException("The specified certificate is no longer valid.");
+                var extensions = certificate.Extensions.OfType<X509KeyUsageExtension>().ToList();
+                if (extensions.Count != 0 && !extensions.Any(extension => extension.KeyUsages.HasFlag(X509KeyUsageFlags.KeyEncipherment)))
+                {
+                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0060));
+                }
             }
 
             if (!certificate.HasPrivateKey)
             {
-                throw new InvalidOperationException("The specified certificate doesn't contain the required private key.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0061));
             }
 
             return AddEncryptionKey(new X509SecurityKey(certificate));
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> retrieved from an
-        /// embedded resource and used to encrypt the tokens issued by OpenIddict.
+        /// Registers an encryption certificate retrieved from an embedded resource.
         /// </summary>
         /// <param name="assembly">The assembly containing the certificate.</param>
         /// <param name="resource">The name of the embedded resource.</param>
         /// <param name="password">The password used to open the certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEncryptionCertificate(
-            [NotNull] Assembly assembly, [NotNull] string resource, [NotNull] string password)
+        public OpenIddictServerBuilder AddEncryptionCertificate(Assembly assembly, string resource, string password)
 #if SUPPORTS_EPHEMERAL_KEY_SETS
             // Note: ephemeral key sets are currently not supported on macOS.
             => AddEncryptionCertificate(assembly, resource, password, RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ?
@@ -422,8 +412,7 @@ namespace Microsoft.Extensions.DependencyInjection
 #endif
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> retrieved from an
-        /// embedded resource and used to encrypt the tokens issued by OpenIddict.
+        /// Registers an encryption certificate retrieved from an embedded resource.
         /// </summary>
         /// <param name="assembly">The assembly containing the certificate.</param>
         /// <param name="resource">The name of the embedded resource.</param>
@@ -431,41 +420,40 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="flags">An enumeration of flags indicating how and where to store the private key of the certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder AddEncryptionCertificate(
-            [NotNull] Assembly assembly, [NotNull] string resource,
-            [NotNull] string password, X509KeyStorageFlags flags)
+            Assembly assembly, string resource,
+            string password, X509KeyStorageFlags flags)
         {
-            if (assembly == null)
+            if (assembly is null)
             {
                 throw new ArgumentNullException(nameof(assembly));
             }
 
             if (string.IsNullOrEmpty(resource))
             {
-                throw new ArgumentException("The resource cannot be null or empty.", nameof(resource));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0062), nameof(resource));
             }
 
             if (string.IsNullOrEmpty(password))
             {
-                throw new ArgumentException("The password cannot be null or empty.", nameof(password));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0063), nameof(password));
             }
 
             using var stream = assembly.GetManifestResourceStream(resource);
-            if (stream == null)
+            if (stream is null)
             {
-                throw new InvalidOperationException("The certificate was not found in the specified assembly.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0064));
             }
 
             return AddEncryptionCertificate(stream, password, flags);
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> extracted from a
-        /// stream and used to encrypt the tokens issued by OpenIddict.
+        /// Registers an encryption certificate extracted from a stream.
         /// </summary>
         /// <param name="stream">The stream containing the certificate.</param>
         /// <param name="password">The password used to open the certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEncryptionCertificate([NotNull] Stream stream, [NotNull] string password)
+        public OpenIddictServerBuilder AddEncryptionCertificate(Stream stream, string password)
 #if SUPPORTS_EPHEMERAL_KEY_SETS
             // Note: ephemeral key sets are currently not supported on macOS.
             => AddEncryptionCertificate(stream, password, RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ?
@@ -476,8 +464,7 @@ namespace Microsoft.Extensions.DependencyInjection
 #endif
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> extracted from a
-        /// stream and used to encrypt the tokens issued by OpenIddict.
+        /// Registers an encryption certificate extracted from a stream.
         /// </summary>
         /// <param name="stream">The stream containing the certificate.</param>
         /// <param name="password">The password used to open the certificate.</param>
@@ -486,17 +473,18 @@ namespace Microsoft.Extensions.DependencyInjection
         /// to store the private key of the certificate.
         /// </param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEncryptionCertificate(
-            [NotNull] Stream stream, [NotNull] string password, X509KeyStorageFlags flags)
+        [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+            Justification = "The X.509 certificate is attached to the server options.")]
+        public OpenIddictServerBuilder AddEncryptionCertificate(Stream stream, string password, X509KeyStorageFlags flags)
         {
-            if (stream == null)
+            if (stream is null)
             {
                 throw new ArgumentNullException(nameof(stream));
             }
 
             if (string.IsNullOrEmpty(password))
             {
-                throw new ArgumentException("The password cannot be null or empty.", nameof(password));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0063), nameof(password));
             }
 
             using var buffer = new MemoryStream();
@@ -506,27 +494,26 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> retrieved from the X.509
-        /// machine store and used to encrypt the tokens issued by OpenIddict.
+        /// Registers an encryption certificate retrieved from the X.509 user or machine store.
         /// </summary>
         /// <param name="thumbprint">The thumbprint of the certificate used to identify it in the X.509 store.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEncryptionCertificate([NotNull] string thumbprint)
+        public OpenIddictServerBuilder AddEncryptionCertificate(string thumbprint)
         {
             if (string.IsNullOrEmpty(thumbprint))
             {
-                throw new ArgumentException("The thumbprint cannot be null or empty.", nameof(thumbprint));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0065), nameof(thumbprint));
             }
 
             var certificate = GetCertificate(StoreLocation.CurrentUser, thumbprint) ?? GetCertificate(StoreLocation.LocalMachine, thumbprint);
-            if (certificate == null)
+            if (certificate is null)
             {
-                throw new InvalidOperationException("The certificate corresponding to the specified thumbprint was not found.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0066));
             }
 
             return AddEncryptionCertificate(certificate);
 
-            static X509Certificate2 GetCertificate(StoreLocation location, string thumbprint)
+            static X509Certificate2? GetCertificate(StoreLocation location, string thumbprint)
             {
                 using var store = new X509Store(StoreName.My, location);
                 store.Open(OpenFlags.ReadOnly);
@@ -538,19 +525,17 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> retrieved from the given
-        /// X.509 store and used to encrypt the tokens issued by OpenIddict.
+        /// Registers an encryption certificate retrieved from the specified X.509 store.
         /// </summary>
         /// <param name="thumbprint">The thumbprint of the certificate used to identify it in the X.509 store.</param>
         /// <param name="name">The name of the X.509 store.</param>
         /// <param name="location">The location of the X.509 store.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEncryptionCertificate(
-            [NotNull] string thumbprint, StoreName name, StoreLocation location)
+        public OpenIddictServerBuilder AddEncryptionCertificate(string thumbprint, StoreName name, StoreLocation location)
         {
             if (string.IsNullOrEmpty(thumbprint))
             {
-                throw new ArgumentException("The thumbprint cannot be null or empty.", nameof(thumbprint));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0065), nameof(thumbprint));
             }
 
             using var store = new X509Store(name, location);
@@ -560,23 +545,22 @@ namespace Microsoft.Extensions.DependencyInjection
                 .OfType<X509Certificate2>()
                 .SingleOrDefault();
 
-            if (certificate == null)
+            if (certificate is null)
             {
-                throw new InvalidOperationException("The certificate corresponding to the specified thumbprint was not found.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0066));
             }
 
             return AddEncryptionCertificate(certificate);
         }
 
         /// <summary>
-        /// Registers the <see cref="SigningCredentials"/> used to sign the tokens issued by OpenIddict.
-        /// Note: using <see cref="RsaSecurityKey"/> asymmetric keys is recommended on production.
+        /// Registers signing credentials.
         /// </summary>
         /// <param name="credentials">The signing credentials.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddSigningCredentials([NotNull] SigningCredentials credentials)
+        public OpenIddictServerBuilder AddSigningCredentials(SigningCredentials credentials)
         {
-            if (credentials == null)
+            if (credentials is null)
             {
                 throw new ArgumentNullException(nameof(credentials));
             }
@@ -585,14 +569,13 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Registers a <see cref="SecurityKey"/> used to sign the tokens issued by OpenIddict.
-        /// Note: using <see cref="RsaSecurityKey"/> asymmetric keys is recommended on production.
+        /// Registers a signing key.
         /// </summary>
         /// <param name="key">The security key.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddSigningKey([NotNull] SecurityKey key)
+        public OpenIddictServerBuilder AddSigningKey(SecurityKey key)
         {
-            if (key == null)
+            if (key is null)
             {
                 throw new ArgumentNullException(nameof(key));
             }
@@ -601,70 +584,64 @@ namespace Microsoft.Extensions.DependencyInjection
             if (key is AsymmetricSecurityKey asymmetricSecurityKey &&
                 asymmetricSecurityKey.PrivateKeyStatus == PrivateKeyStatus.DoesNotExist)
             {
-                throw new InvalidOperationException("The asymmetric signing key doesn't contain the required private key.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0067));
             }
 
-            if (IsAlgorithmSupported(key, SecurityAlgorithms.RsaSha256))
+            if (key.IsSupportedAlgorithm(SecurityAlgorithms.RsaSha256))
             {
                 return AddSigningCredentials(new SigningCredentials(key, SecurityAlgorithms.RsaSha256));
             }
 
-            if (IsAlgorithmSupported(key, SecurityAlgorithms.HmacSha256))
+            if (key.IsSupportedAlgorithm(SecurityAlgorithms.HmacSha256))
             {
                 return AddSigningCredentials(new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
             }
 
 #if SUPPORTS_ECDSA
             // Note: ECDSA algorithms are bound to specific curves and must be treated separately.
-            if (IsAlgorithmSupported(key, SecurityAlgorithms.EcdsaSha256))
+            if (key.IsSupportedAlgorithm(SecurityAlgorithms.EcdsaSha256))
             {
                 return AddSigningCredentials(new SigningCredentials(key, SecurityAlgorithms.EcdsaSha256));
             }
 
-            if (IsAlgorithmSupported(key, SecurityAlgorithms.EcdsaSha384))
+            if (key.IsSupportedAlgorithm(SecurityAlgorithms.EcdsaSha384))
             {
                 return AddSigningCredentials(new SigningCredentials(key, SecurityAlgorithms.EcdsaSha384));
             }
 
-            if (IsAlgorithmSupported(key, SecurityAlgorithms.EcdsaSha512))
+            if (key.IsSupportedAlgorithm(SecurityAlgorithms.EcdsaSha512))
             {
                 return AddSigningCredentials(new SigningCredentials(key, SecurityAlgorithms.EcdsaSha512));
             }
 #else
-            if (IsAlgorithmSupported(key, SecurityAlgorithms.EcdsaSha256) ||
-                IsAlgorithmSupported(key, SecurityAlgorithms.EcdsaSha384) ||
-                IsAlgorithmSupported(key, SecurityAlgorithms.EcdsaSha512))
+            if (key.IsSupportedAlgorithm(SecurityAlgorithms.EcdsaSha256) ||
+                key.IsSupportedAlgorithm(SecurityAlgorithms.EcdsaSha384) ||
+                key.IsSupportedAlgorithm(SecurityAlgorithms.EcdsaSha512))
             {
-                throw new PlatformNotSupportedException("ECDSA signing keys are not supported on this platform.");
+                throw new PlatformNotSupportedException(SR.GetResourceString(SR.ID0069));
             }
 #endif
 
-            throw new InvalidOperationException(new StringBuilder()
-                .AppendLine("A signature algorithm cannot be automatically inferred from the signing key.")
-                .Append("Consider using 'options.AddSigningCredentials(SigningCredentials)' instead.")
-                .ToString());
-
-            static bool IsAlgorithmSupported(SecurityKey key, string algorithm) =>
-                key.CryptoProviderFactory.IsSupportedAlgorithm(algorithm, key);
+            throw new InvalidOperationException(SR.GetResourceString(SR.ID0068));
         }
 
         /// <summary>
-        /// Registers (and generates if necessary) a user-specific development
-        /// certificate used to sign the tokens issued by OpenIddict.
+        /// Registers (and generates if necessary) a user-specific development signing certificate.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder AddDevelopmentSigningCertificate()
             => AddDevelopmentSigningCertificate(new X500DistinguishedName("CN=OpenIddict Server Signing Certificate"));
 
         /// <summary>
-        /// Registers (and generates if necessary) a user-specific development
-        /// certificate used to sign the tokens issued by OpenIddict.
+        /// Registers (and generates if necessary) a user-specific development signing certificate.
         /// </summary>
         /// <param name="subject">The subject name associated with the certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddDevelopmentSigningCertificate([NotNull] X500DistinguishedName subject)
+        [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+            Justification = "The X.509 certificate is attached to the server options.")]
+        public OpenIddictServerBuilder AddDevelopmentSigningCertificate(X500DistinguishedName subject)
         {
-            if (subject == null)
+            if (subject is null)
             {
                 throw new ArgumentNullException(nameof(subject));
             }
@@ -672,29 +649,21 @@ namespace Microsoft.Extensions.DependencyInjection
             using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
             store.Open(OpenFlags.ReadWrite);
 
-            // Try to retrieve the development certificate from the specified store.
-            // If a certificate was found but is not yet or no longer valid, remove it
-            // from the store before creating and persisting a new signing certificate.
-            var certificate = store.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, subject.Name, validOnly: false)
+            // Try to retrieve the existing development certificates from the specified store.
+            // If no valid existing certificate was found, create a new signing certificate.
+            var certificates = store.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, subject.Name, validOnly: false)
                 .OfType<X509Certificate2>()
-                .SingleOrDefault();
+                .ToList();
 
-            if (certificate != null && (certificate.NotBefore > DateTime.Now || certificate.NotAfter < DateTime.Now))
+            if (!certificates.Any(certificate => certificate.NotBefore < DateTime.Now && certificate.NotAfter > DateTime.Now))
             {
-                store.Remove(certificate);
-                certificate = null;
-            }
-
 #if SUPPORTS_CERTIFICATE_GENERATION
-            // If no appropriate certificate can be found, generate and persist a new certificate in the specified store.
-            if (certificate == null)
-            {
                 using var algorithm = RSA.Create(keySizeInBits: 2048);
 
                 var request = new CertificateRequest(subject, algorithm, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
                 request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, critical: true));
 
-                certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(2));
+                var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(2));
 
                 // Note: setting the friendly name is not supported on Unix machines (including Linux and macOS).
                 // To ensure an exception is not thrown by the property setter, an OS runtime check is used here.
@@ -720,7 +689,7 @@ namespace Microsoft.Extensions.DependencyInjection
                         flags |= X509KeyStorageFlags.Exportable;
                     }
 
-                    certificate = new X509Certificate2(data, string.Empty, flags);
+                    certificates.Insert(0, certificate = new X509Certificate2(data, string.Empty, flags));
                 }
 
                 finally
@@ -729,17 +698,20 @@ namespace Microsoft.Extensions.DependencyInjection
                 }
 
                 store.Add(certificate);
+#else
+                throw new PlatformNotSupportedException(SR.GetResourceString(SR.ID0264));
+#endif
             }
 
-            return AddSigningCertificate(certificate);
-#else
-            throw new PlatformNotSupportedException("X.509 certificate generation is not supported on this platform.");
-#endif
+            return Configure(options => options.SigningCredentials.AddRange(
+                from certificate in certificates
+                let key = new X509SecurityKey(certificate)
+                select new SigningCredentials(key, SecurityAlgorithms.RsaSha256)));
         }
 
         /// <summary>
-        /// Registers a new ephemeral key used to sign the tokens issued by OpenIddict: the key
-        /// is discarded when the application shuts down and tokens signed using this key are
+        /// Registers a new ephemeral signing key. Ephemeral signing keys are automatically
+        /// discarded when the application shuts down and payloads signed using this key are
         /// automatically invalidated. This method should only be used during development.
         /// On production, using a X.509 certificate stored in the machine store is recommended.
         /// </summary>
@@ -748,65 +720,68 @@ namespace Microsoft.Extensions.DependencyInjection
             => AddEphemeralSigningKey(SecurityAlgorithms.RsaSha256);
 
         /// <summary>
-        /// Registers a new ephemeral key used to sign the tokens issued by OpenIddict: the key
-        /// is discarded when the application shuts down and tokens signed using this key are
+        /// Registers a new ephemeral signing key. Ephemeral signing keys are automatically
+        /// discarded when the application shuts down and payloads signed using this key are
         /// automatically invalidated. This method should only be used during development.
         /// On production, using a X.509 certificate stored in the machine store is recommended.
         /// </summary>
         /// <param name="algorithm">The algorithm associated with the signing key.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddEphemeralSigningKey([NotNull] string algorithm)
+        [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+            Justification = "The X.509 certificate is attached to the server options.")]
+        public OpenIddictServerBuilder AddEphemeralSigningKey(string algorithm)
         {
             if (string.IsNullOrEmpty(algorithm))
             {
-                throw new ArgumentException("The algorithm cannot be null or empty.", nameof(algorithm));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0057), nameof(algorithm));
             }
 
-            switch (algorithm)
+            return algorithm switch
             {
-                case SecurityAlgorithms.RsaSha256:
-                case SecurityAlgorithms.RsaSha384:
-                case SecurityAlgorithms.RsaSha512:
-                case SecurityAlgorithms.RsaSha256Signature:
-                case SecurityAlgorithms.RsaSha384Signature:
-                case SecurityAlgorithms.RsaSha512Signature:
-
-                case SecurityAlgorithms.RsaSsaPssSha256:
-                case SecurityAlgorithms.RsaSsaPssSha384:
-                case SecurityAlgorithms.RsaSsaPssSha512:
-                case SecurityAlgorithms.RsaSsaPssSha256Signature:
-                case SecurityAlgorithms.RsaSsaPssSha384Signature:
-                case SecurityAlgorithms.RsaSsaPssSha512Signature:
-                    return AddSigningCredentials(new SigningCredentials(CreateRsaSecurityKey(2048), algorithm));
+                SecurityAlgorithms.RsaSha256 or
+                SecurityAlgorithms.RsaSha384 or
+                SecurityAlgorithms.RsaSha512 or
+                SecurityAlgorithms.RsaSha256Signature or
+                SecurityAlgorithms.RsaSha384Signature or
+                SecurityAlgorithms.RsaSha512Signature or
+                SecurityAlgorithms.RsaSsaPssSha256 or
+                SecurityAlgorithms.RsaSsaPssSha384 or
+                SecurityAlgorithms.RsaSsaPssSha512 or
+                SecurityAlgorithms.RsaSsaPssSha256Signature or
+                SecurityAlgorithms.RsaSsaPssSha384Signature or
+                SecurityAlgorithms.RsaSsaPssSha512Signature
+                    => AddSigningCredentials(new SigningCredentials(CreateRsaSecurityKey(2048), algorithm)),
 
 #if SUPPORTS_ECDSA
-                case SecurityAlgorithms.EcdsaSha256:
-                case SecurityAlgorithms.EcdsaSha256Signature:
-                    return AddSigningCredentials(new SigningCredentials(new ECDsaSecurityKey(
-                        ECDsa.Create(ECCurve.NamedCurves.nistP256)), algorithm));
+                SecurityAlgorithms.EcdsaSha256 or
+                SecurityAlgorithms.EcdsaSha256Signature
+                    => AddSigningCredentials(new SigningCredentials(new ECDsaSecurityKey(
+                        ECDsa.Create(ECCurve.NamedCurves.nistP256)), algorithm)),
 
-                case SecurityAlgorithms.EcdsaSha384:
-                case SecurityAlgorithms.EcdsaSha384Signature:
-                    return AddSigningCredentials(new SigningCredentials(new ECDsaSecurityKey(
-                        ECDsa.Create(ECCurve.NamedCurves.nistP384)), algorithm));
+                SecurityAlgorithms.EcdsaSha384 or
+                SecurityAlgorithms.EcdsaSha384Signature
+                    => AddSigningCredentials(new SigningCredentials(new ECDsaSecurityKey(
+                        ECDsa.Create(ECCurve.NamedCurves.nistP384)), algorithm)),
 
-                case SecurityAlgorithms.EcdsaSha512:
-                case SecurityAlgorithms.EcdsaSha512Signature:
-                    return AddSigningCredentials(new SigningCredentials(new ECDsaSecurityKey(
-                        ECDsa.Create(ECCurve.NamedCurves.nistP521)), algorithm));
+                SecurityAlgorithms.EcdsaSha512 or
+                SecurityAlgorithms.EcdsaSha512Signature
+                    => AddSigningCredentials(new SigningCredentials(new ECDsaSecurityKey(
+                        ECDsa.Create(ECCurve.NamedCurves.nistP521)), algorithm)),
 #else
-                case SecurityAlgorithms.EcdsaSha256:
-                case SecurityAlgorithms.EcdsaSha384:
-                case SecurityAlgorithms.EcdsaSha512:
-                case SecurityAlgorithms.EcdsaSha256Signature:
-                case SecurityAlgorithms.EcdsaSha384Signature:
-                case SecurityAlgorithms.EcdsaSha512Signature:
-                    throw new PlatformNotSupportedException("ECDSA signing keys are not supported on this platform.");
+                SecurityAlgorithms.EcdsaSha256 or
+                SecurityAlgorithms.EcdsaSha384 or
+                SecurityAlgorithms.EcdsaSha512 or
+                SecurityAlgorithms.EcdsaSha256Signature or
+                SecurityAlgorithms.EcdsaSha384Signature or
+                SecurityAlgorithms.EcdsaSha512Signature
+                    => throw new PlatformNotSupportedException(SR.GetResourceString(SR.ID0069)),
 #endif
 
-                default: throw new InvalidOperationException("The specified algorithm is not supported.");
-            }
+                _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0058)),
+            };
 
+            [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+                Justification = "The generated RSA key is attached to the server options.")]
             static RsaSecurityKey CreateRsaSecurityKey(int size)
             {
 #if SUPPORTS_DIRECT_KEY_CREATION_WITH_SPECIFIED_SIZE
@@ -830,7 +805,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
                 if (algorithm.KeySize < size)
                 {
-                    throw new InvalidOperationException("RSA key generation failed.");
+                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0059));
                 }
 
                 return new RsaSecurityKey(algorithm);
@@ -839,45 +814,44 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> that is used to sign the tokens issued by OpenIddict.
+        /// Registers a signing certificate.
         /// </summary>
-        /// <param name="certificate">The certificate used to sign the security tokens issued by the server.</param>
+        /// <param name="certificate">The signing certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddSigningCertificate([NotNull] X509Certificate2 certificate)
+        public OpenIddictServerBuilder AddSigningCertificate(X509Certificate2 certificate)
         {
-            if (certificate == null)
+            if (certificate is null)
             {
                 throw new ArgumentNullException(nameof(certificate));
             }
 
-            if (certificate.NotBefore > DateTime.Now)
+            // If the certificate is a X.509v3 certificate that specifies at least
+            // one key usage, ensure that the certificate key can be used for signing.
+            if (certificate.Version >= 3)
             {
-                throw new InvalidOperationException("The specified certificate is not yet valid.");
-            }
-
-            if (certificate.NotAfter < DateTime.Now)
-            {
-                throw new InvalidOperationException("The specified certificate is no longer valid.");
+                var extensions = certificate.Extensions.OfType<X509KeyUsageExtension>().ToList();
+                if (extensions.Count != 0 && !extensions.Any(extension => extension.KeyUsages.HasFlag(X509KeyUsageFlags.DigitalSignature)))
+                {
+                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0070));
+                }
             }
 
             if (!certificate.HasPrivateKey)
             {
-                throw new InvalidOperationException("The specified certificate doesn't contain the required private key.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0061));
             }
 
             return AddSigningKey(new X509SecurityKey(certificate));
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> retrieved from an
-        /// embedded resource and used to sign the tokens issued by OpenIddict.
+        /// Registers a signing certificate retrieved from an embedded resource.
         /// </summary>
         /// <param name="assembly">The assembly containing the certificate.</param>
         /// <param name="resource">The name of the embedded resource.</param>
         /// <param name="password">The password used to open the certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddSigningCertificate(
-            [NotNull] Assembly assembly, [NotNull] string resource, [NotNull] string password)
+        public OpenIddictServerBuilder AddSigningCertificate(Assembly assembly, string resource, string password)
 #if SUPPORTS_EPHEMERAL_KEY_SETS
             // Note: ephemeral key sets are currently not supported on macOS.
             => AddSigningCertificate(assembly, resource, password, RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ?
@@ -888,8 +862,7 @@ namespace Microsoft.Extensions.DependencyInjection
 #endif
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> retrieved from an
-        /// embedded resource and used to sign the tokens issued by OpenIddict.
+        /// Registers a signing certificate retrieved from an embedded resource.
         /// </summary>
         /// <param name="assembly">The assembly containing the certificate.</param>
         /// <param name="resource">The name of the embedded resource.</param>
@@ -897,41 +870,40 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="flags">An enumeration of flags indicating how and where to store the private key of the certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder AddSigningCertificate(
-            [NotNull] Assembly assembly, [NotNull] string resource,
-            [NotNull] string password, X509KeyStorageFlags flags)
+            Assembly assembly, string resource,
+            string password, X509KeyStorageFlags flags)
         {
-            if (assembly == null)
+            if (assembly is null)
             {
                 throw new ArgumentNullException(nameof(assembly));
             }
 
             if (string.IsNullOrEmpty(resource))
             {
-                throw new ArgumentException("The resource cannot be null or empty.", nameof(resource));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0062), nameof(resource));
             }
 
             if (string.IsNullOrEmpty(password))
             {
-                throw new ArgumentException("The password cannot be null or empty.", nameof(password));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0063), nameof(password));
             }
 
             using var stream = assembly.GetManifestResourceStream(resource);
-            if (stream == null)
+            if (stream is null)
             {
-                throw new InvalidOperationException("The certificate was not found in the specified assembly.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0064));
             }
 
             return AddSigningCertificate(stream, password, flags);
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> extracted from a
-        /// stream and used to sign the tokens issued by OpenIddict.
+        /// Registers a signing certificate extracted from a stream.
         /// </summary>
         /// <param name="stream">The stream containing the certificate.</param>
         /// <param name="password">The password used to open the certificate.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddSigningCertificate([NotNull] Stream stream, [NotNull] string password)
+        public OpenIddictServerBuilder AddSigningCertificate(Stream stream, string password)
 #if SUPPORTS_EPHEMERAL_KEY_SETS
             // Note: ephemeral key sets are currently not supported on macOS.
             => AddSigningCertificate(stream, password, RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ?
@@ -942,8 +914,7 @@ namespace Microsoft.Extensions.DependencyInjection
 #endif
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> extracted from a
-        /// stream and used to sign the tokens issued by OpenIddict.
+        /// Registers a signing certificate extracted from a stream.
         /// </summary>
         /// <param name="stream">The stream containing the certificate.</param>
         /// <param name="password">The password used to open the certificate.</param>
@@ -952,17 +923,18 @@ namespace Microsoft.Extensions.DependencyInjection
         /// to store the private key of the certificate.
         /// </param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddSigningCertificate(
-            [NotNull] Stream stream, [NotNull] string password, X509KeyStorageFlags flags)
+        [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
+            Justification = "The X.509 certificate is attached to the server options.")]
+        public OpenIddictServerBuilder AddSigningCertificate(Stream stream, string password, X509KeyStorageFlags flags)
         {
-            if (stream == null)
+            if (stream is null)
             {
                 throw new ArgumentNullException(nameof(stream));
             }
 
             if (string.IsNullOrEmpty(password))
             {
-                throw new ArgumentException("The password cannot be null or empty.", nameof(password));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0063), nameof(password));
             }
 
             using var buffer = new MemoryStream();
@@ -972,27 +944,26 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> retrieved from the X.509
-        /// machine store and used to sign the tokens issued by OpenIddict.
+        /// Registers a signing certificate retrieved from the X.509 user or machine store.
         /// </summary>
         /// <param name="thumbprint">The thumbprint of the certificate used to identify it in the X.509 store.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddSigningCertificate([NotNull] string thumbprint)
+        public OpenIddictServerBuilder AddSigningCertificate(string thumbprint)
         {
             if (string.IsNullOrEmpty(thumbprint))
             {
-                throw new ArgumentException("The thumbprint cannot be null or empty.", nameof(thumbprint));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0065), nameof(thumbprint));
             }
 
             var certificate = GetCertificate(StoreLocation.CurrentUser, thumbprint) ?? GetCertificate(StoreLocation.LocalMachine, thumbprint);
-            if (certificate == null)
+            if (certificate is null)
             {
-                throw new InvalidOperationException("The certificate corresponding to the specified thumbprint was not found.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0066));
             }
 
             return AddSigningCertificate(certificate);
 
-            static X509Certificate2 GetCertificate(StoreLocation location, string thumbprint)
+            static X509Certificate2? GetCertificate(StoreLocation location, string thumbprint)
             {
                 using var store = new X509Store(StoreName.My, location);
                 store.Open(OpenFlags.ReadOnly);
@@ -1004,19 +975,17 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Registers a <see cref="X509Certificate2"/> retrieved from the given
-        /// X.509 store and used to sign the tokens issued by OpenIddict.
+        /// Registers a signing certificate retrieved from the specified X.509 store.
         /// </summary>
         /// <param name="thumbprint">The thumbprint of the certificate used to identify it in the X.509 store.</param>
         /// <param name="name">The name of the X.509 store.</param>
         /// <param name="location">The location of the X.509 store.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AddSigningCertificate(
-            [NotNull] string thumbprint, StoreName name, StoreLocation location)
+        public OpenIddictServerBuilder AddSigningCertificate(string thumbprint, StoreName name, StoreLocation location)
         {
             if (string.IsNullOrEmpty(thumbprint))
             {
-                throw new ArgumentException("The thumbprint cannot be null or empty.", nameof(thumbprint));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0065), nameof(thumbprint));
             }
 
             using var store = new X509Store(name, location);
@@ -1026,9 +995,9 @@ namespace Microsoft.Extensions.DependencyInjection
                 .OfType<X509Certificate2>()
                 .SingleOrDefault();
 
-            if (certificate == null)
+            if (certificate is null)
             {
-                throw new InvalidOperationException("The certificate corresponding to the specified thumbprint was not found.");
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0066));
             }
 
             return AddSigningCertificate(certificate);
@@ -1042,7 +1011,18 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder AllowAuthorizationCodeFlow()
-            => Configure(options => options.GrantTypes.Add(OpenIddictConstants.GrantTypes.AuthorizationCode));
+            => Configure(options =>
+            {
+                options.CodeChallengeMethods.Add(CodeChallengeMethods.Sha256);
+
+                options.GrantTypes.Add(GrantTypes.AuthorizationCode);
+
+                options.ResponseModes.Add(ResponseModes.FormPost);
+                options.ResponseModes.Add(ResponseModes.Fragment);
+                options.ResponseModes.Add(ResponseModes.Query);
+
+                options.ResponseTypes.Add(ResponseTypes.Code);
+            });
 
         /// <summary>
         /// Enables client credentials flow support. For more information about this
@@ -1050,22 +1030,52 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder AllowClientCredentialsFlow()
-            => Configure(options => options.GrantTypes.Add(OpenIddictConstants.GrantTypes.ClientCredentials));
+            => Configure(options => options.GrantTypes.Add(GrantTypes.ClientCredentials));
 
         /// <summary>
         /// Enables custom grant type support.
         /// </summary>
         /// <param name="type">The grant type associated with the flow.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder AllowCustomFlow([NotNull] string type)
+        public OpenIddictServerBuilder AllowCustomFlow(string type)
         {
             if (string.IsNullOrEmpty(type))
             {
-                throw new ArgumentException("The grant type cannot be null or empty.", nameof(type));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0071), nameof(type));
             }
 
             return Configure(options => options.GrantTypes.Add(type));
         }
+
+        /// <summary>
+        /// Enables device code flow support. For more information about this
+        /// specific OAuth 2.0 flow, visit https://tools.ietf.org/html/rfc8628.
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder AllowDeviceCodeFlow()
+            => Configure(options => options.GrantTypes.Add(GrantTypes.DeviceCode));
+
+        /// <summary>
+        /// Enables hybrid flow support. For more information
+        /// about this specific OpenID Connect flow, visit
+        /// http://openid.net/specs/openid-connect-core-1_0.html#HybridFlowAuth.
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder AllowHybridFlow()
+            => Configure(options =>
+            {
+                options.CodeChallengeMethods.Add(CodeChallengeMethods.Sha256);
+
+                options.GrantTypes.Add(GrantTypes.AuthorizationCode);
+                options.GrantTypes.Add(GrantTypes.Implicit);
+
+                options.ResponseModes.Add(ResponseModes.FormPost);
+                options.ResponseModes.Add(ResponseModes.Fragment);
+
+                options.ResponseTypes.Add(ResponseTypes.Code + ' ' + ResponseTypes.IdToken);
+                options.ResponseTypes.Add(ResponseTypes.Code + ' ' + ResponseTypes.IdToken + ' ' + ResponseTypes.Token);
+                options.ResponseTypes.Add(ResponseTypes.Code + ' ' + ResponseTypes.Token);
+            });
 
         /// <summary>
         /// Enables implicit flow support. For more information
@@ -1075,7 +1085,25 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder AllowImplicitFlow()
-            => Configure(options => options.GrantTypes.Add(OpenIddictConstants.GrantTypes.Implicit));
+            => Configure(options =>
+            {
+                options.GrantTypes.Add(GrantTypes.Implicit);
+
+                options.ResponseModes.Add(ResponseModes.FormPost);
+                options.ResponseModes.Add(ResponseModes.Fragment);
+
+                options.ResponseTypes.Add(ResponseTypes.IdToken);
+                options.ResponseTypes.Add(ResponseTypes.IdToken + ' ' + ResponseTypes.Token);
+                options.ResponseTypes.Add(ResponseTypes.Token);
+            });
+
+        /// <summary>
+        /// Enables none flow support. For more information about this specific OAuth 2.0 flow,
+        /// visit https://openid.net/specs/oauth-v2-multiple-response-types-1_0.html#none.
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder AllowNoneFlow()
+            => Configure(options => options.ResponseTypes.Add(ResponseTypes.None));
 
         /// <summary>
         /// Enables password flow support. For more information about this specific
@@ -1083,7 +1111,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder AllowPasswordFlow()
-            => Configure(options => options.GrantTypes.Add(OpenIddictConstants.GrantTypes.Password));
+            => Configure(options => options.GrantTypes.Add(GrantTypes.Password));
 
         /// <summary>
         /// Enables refresh token flow support. For more information about this
@@ -1091,7 +1119,12 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder AllowRefreshTokenFlow()
-            => Configure(options => options.GrantTypes.Add(OpenIddictConstants.GrantTypes.RefreshToken));
+            => Configure(options =>
+            {
+                options.GrantTypes.Add(GrantTypes.RefreshToken);
+
+                options.Scopes.Add(Scopes.OfflineAccess);
+            });
 
         /// <summary>
         /// Sets the relative or absolute URLs associated to the authorization endpoint.
@@ -1100,9 +1133,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetAuthorizationEndpointUris([NotNull] params string[] addresses)
+        public OpenIddictServerBuilder SetAuthorizationEndpointUris(params string[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
@@ -1117,31 +1150,27 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetAuthorizationEndpointUris([NotNull] params Uri[] addresses)
+        public OpenIddictServerBuilder SetAuthorizationEndpointUris(params Uri[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
 
             if (addresses.Any(address => !address.IsWellFormedOriginalString()))
             {
-                throw new ArgumentException("One of the specified addresses is not valid.", nameof(addresses));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
             }
 
-            if (addresses.Any(address => !address.IsAbsoluteUri && !address.OriginalString.StartsWith("/", StringComparison.OrdinalIgnoreCase)))
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Relative URLs must start with a '/'.", nameof(addresses));
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
             }
 
             return Configure(options =>
             {
                 options.AuthorizationEndpointUris.Clear();
-
-                foreach (var address in addresses)
-                {
-                    options.AuthorizationEndpointUris.Add(address);
-                }
+                options.AuthorizationEndpointUris.AddRange(addresses);
             });
         }
 
@@ -1152,9 +1181,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetConfigurationEndpointUris([NotNull] params string[] addresses)
+        public OpenIddictServerBuilder SetConfigurationEndpointUris(params string[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
@@ -1169,31 +1198,27 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetConfigurationEndpointUris([NotNull] params Uri[] addresses)
+        public OpenIddictServerBuilder SetConfigurationEndpointUris(params Uri[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
 
             if (addresses.Any(address => !address.IsWellFormedOriginalString()))
             {
-                throw new ArgumentException("One of the specified addresses is not valid.", nameof(addresses));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
             }
 
-            if (addresses.Any(address => !address.IsAbsoluteUri && !address.OriginalString.StartsWith("/", StringComparison.OrdinalIgnoreCase)))
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Relative URLs must start with a '/'.", nameof(addresses));
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
             }
 
             return Configure(options =>
             {
                 options.ConfigurationEndpointUris.Clear();
-
-                foreach (var address in addresses)
-                {
-                    options.ConfigurationEndpointUris.Add(address);
-                }
+                options.ConfigurationEndpointUris.AddRange(addresses);
             });
         }
 
@@ -1204,9 +1229,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetCryptographyEndpointUris([NotNull] params string[] addresses)
+        public OpenIddictServerBuilder SetCryptographyEndpointUris(params string[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
@@ -1221,31 +1246,75 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetCryptographyEndpointUris([NotNull] params Uri[] addresses)
+        public OpenIddictServerBuilder SetCryptographyEndpointUris(params Uri[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
 
             if (addresses.Any(address => !address.IsWellFormedOriginalString()))
             {
-                throw new ArgumentException("One of the specified addresses is not valid.", nameof(addresses));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
             }
 
-            if (addresses.Any(address => !address.IsAbsoluteUri && !address.OriginalString.StartsWith("/", StringComparison.OrdinalIgnoreCase)))
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Relative URLs must start with a '/'.", nameof(addresses));
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
             }
 
             return Configure(options =>
             {
                 options.CryptographyEndpointUris.Clear();
+                options.CryptographyEndpointUris.AddRange(addresses);
+            });
+        }
 
-                foreach (var address in addresses)
-                {
-                    options.CryptographyEndpointUris.Add(address);
-                }
+        /// <summary>
+        /// Sets the relative or absolute URLs associated to the device endpoint.
+        /// If an empty array is specified, the endpoint will be considered disabled.
+        /// Note: only the first address will be returned as part of the discovery document.
+        /// </summary>
+        /// <param name="addresses">The addresses associated to the endpoint.</param>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder SetDeviceEndpointUris(params string[] addresses)
+        {
+            if (addresses is null)
+            {
+                throw new ArgumentNullException(nameof(addresses));
+            }
+
+            return SetDeviceEndpointUris(addresses.Select(address => new Uri(address, UriKind.RelativeOrAbsolute)).ToArray());
+        }
+
+        /// <summary>
+        /// Sets the relative or absolute URLs associated to the device endpoint.
+        /// If an empty array is specified, the endpoint will be considered disabled.
+        /// Note: only the first address will be returned as part of the discovery document.
+        /// </summary>
+        /// <param name="addresses">The addresses associated to the endpoint.</param>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder SetDeviceEndpointUris(params Uri[] addresses)
+        {
+            if (addresses is null)
+            {
+                throw new ArgumentNullException(nameof(addresses));
+            }
+
+            if (addresses.Any(address => !address.IsWellFormedOriginalString()))
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
+            }
+
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
+            }
+
+            return Configure(options =>
+            {
+                options.DeviceEndpointUris.Clear();
+                options.DeviceEndpointUris.AddRange(addresses);
             });
         }
 
@@ -1256,9 +1325,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetIntrospectionEndpointUris([NotNull] params string[] addresses)
+        public OpenIddictServerBuilder SetIntrospectionEndpointUris(params string[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
@@ -1273,31 +1342,27 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetIntrospectionEndpointUris([NotNull] params Uri[] addresses)
+        public OpenIddictServerBuilder SetIntrospectionEndpointUris(params Uri[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
 
             if (addresses.Any(address => !address.IsWellFormedOriginalString()))
             {
-                throw new ArgumentException("One of the specified addresses is not valid.", nameof(addresses));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
             }
 
-            if (addresses.Any(address => !address.IsAbsoluteUri && !address.OriginalString.StartsWith("/", StringComparison.OrdinalIgnoreCase)))
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Relative URLs must start with a '/'.", nameof(addresses));
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
             }
 
             return Configure(options =>
             {
                 options.IntrospectionEndpointUris.Clear();
-
-                foreach (var address in addresses)
-                {
-                    options.IntrospectionEndpointUris.Add(address);
-                }
+                options.IntrospectionEndpointUris.AddRange(addresses);
             });
         }
 
@@ -1308,9 +1373,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetLogoutEndpointUris([NotNull] params string[] addresses)
+        public OpenIddictServerBuilder SetLogoutEndpointUris(params string[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
@@ -1325,31 +1390,27 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetLogoutEndpointUris([NotNull] params Uri[] addresses)
+        public OpenIddictServerBuilder SetLogoutEndpointUris(params Uri[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
 
             if (addresses.Any(address => !address.IsWellFormedOriginalString()))
             {
-                throw new ArgumentException("One of the specified addresses is not valid.", nameof(addresses));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
             }
 
-            if (addresses.Any(address => !address.IsAbsoluteUri && !address.OriginalString.StartsWith("/", StringComparison.OrdinalIgnoreCase)))
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Relative URLs must start with a '/'.", nameof(addresses));
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
             }
 
             return Configure(options =>
             {
                 options.LogoutEndpointUris.Clear();
-
-                foreach (var address in addresses)
-                {
-                    options.LogoutEndpointUris.Add(address);
-                }
+                options.LogoutEndpointUris.AddRange(addresses);
             });
         }
 
@@ -1360,9 +1421,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetRevocationEndpointUris([NotNull] params string[] addresses)
+        public OpenIddictServerBuilder SetRevocationEndpointUris(params string[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
@@ -1377,31 +1438,27 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetRevocationEndpointUris([NotNull] params Uri[] addresses)
+        public OpenIddictServerBuilder SetRevocationEndpointUris(params Uri[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
 
             if (addresses.Any(address => !address.IsWellFormedOriginalString()))
             {
-                throw new ArgumentException("One of the specified addresses is not valid.", nameof(addresses));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
             }
 
-            if (addresses.Any(address => !address.IsAbsoluteUri && !address.OriginalString.StartsWith("/", StringComparison.OrdinalIgnoreCase)))
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Relative URLs must start with a '/'.", nameof(addresses));
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
             }
 
             return Configure(options =>
             {
                 options.RevocationEndpointUris.Clear();
-
-                foreach (var address in addresses)
-                {
-                    options.RevocationEndpointUris.Add(address);
-                }
+                options.RevocationEndpointUris.AddRange(addresses);
             });
         }
 
@@ -1412,9 +1469,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetTokenEndpointUris([NotNull] params string[] addresses)
+        public OpenIddictServerBuilder SetTokenEndpointUris(params string[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
@@ -1429,31 +1486,27 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetTokenEndpointUris([NotNull] params Uri[] addresses)
+        public OpenIddictServerBuilder SetTokenEndpointUris(params Uri[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
 
             if (addresses.Any(address => !address.IsWellFormedOriginalString()))
             {
-                throw new ArgumentException("One of the specified addresses is not valid.", nameof(addresses));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
             }
 
-            if (addresses.Any(address => !address.IsAbsoluteUri && !address.OriginalString.StartsWith("/", StringComparison.OrdinalIgnoreCase)))
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Relative URLs must start with a '/'.", nameof(addresses));
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
             }
 
             return Configure(options =>
             {
                 options.TokenEndpointUris.Clear();
-
-                foreach (var address in addresses)
-                {
-                    options.TokenEndpointUris.Add(address);
-                }
+                options.TokenEndpointUris.AddRange(addresses);
             });
         }
 
@@ -1464,9 +1517,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetUserinfoEndpointUris([NotNull] params string[] addresses)
+        public OpenIddictServerBuilder SetUserinfoEndpointUris(params string[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
@@ -1481,33 +1534,86 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="addresses">The addresses associated to the endpoint.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetUserinfoEndpointUris([NotNull] params Uri[] addresses)
+        public OpenIddictServerBuilder SetUserinfoEndpointUris(params Uri[] addresses)
         {
-            if (addresses == null)
+            if (addresses is null)
             {
                 throw new ArgumentNullException(nameof(addresses));
             }
 
             if (addresses.Any(address => !address.IsWellFormedOriginalString()))
             {
-                throw new ArgumentException("One of the specified addresses is not valid.", nameof(addresses));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
             }
 
-            if (addresses.Any(address => !address.IsAbsoluteUri && !address.OriginalString.StartsWith("/", StringComparison.OrdinalIgnoreCase)))
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Relative URLs must start with a '/'.", nameof(addresses));
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
             }
 
             return Configure(options =>
             {
                 options.UserinfoEndpointUris.Clear();
-
-                foreach (var address in addresses)
-                {
-                    options.UserinfoEndpointUris.Add(address);
-                }
+                options.UserinfoEndpointUris.AddRange(addresses);
             });
         }
+
+        /// <summary>
+        /// Sets the relative or absolute URLs associated to the verification endpoint.
+        /// If an empty array is specified, the endpoint will be considered disabled.
+        /// Note: only the first address will be returned by the device endpoint.
+        /// </summary>
+        /// <param name="addresses">The addresses associated to the endpoint.</param>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder SetVerificationEndpointUris(params string[] addresses)
+        {
+            if (addresses is null)
+            {
+                throw new ArgumentNullException(nameof(addresses));
+            }
+
+            return SetVerificationEndpointUris(addresses.Select(address => new Uri(address, UriKind.RelativeOrAbsolute)).ToArray());
+        }
+
+        /// <summary>
+        /// Sets the relative or absolute URLs associated to the verification endpoint.
+        /// If an empty array is specified, the endpoint will be considered disabled.
+        /// Note: only the first address will be returned by the device endpoint.
+        /// </summary>
+        /// <param name="addresses">The addresses associated to the endpoint.</param>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder SetVerificationEndpointUris(params Uri[] addresses)
+        {
+            if (addresses is null)
+            {
+                throw new ArgumentNullException(nameof(addresses));
+            }
+
+            if (addresses.Any(address => !address.IsWellFormedOriginalString()))
+            {
+                throw new ArgumentException(SR.GetResourceString(SR.ID0072), nameof(addresses));
+            }
+
+            if (addresses.Any(address => address.OriginalString.StartsWith("~", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException(SR.FormatID0081("~"), nameof(addresses));
+            }
+
+            return Configure(options =>
+            {
+                options.VerificationEndpointUris.Clear();
+                options.VerificationEndpointUris.AddRange(addresses);
+            });
+        }
+
+        /// <summary>
+        /// Disables JWT access token encryption (this option doesn't affect Data Protection tokens).
+        /// Disabling encryption is NOT recommended and SHOULD only be done when issuing tokens
+        /// to third-party resource servers/APIs you don't control and don't fully trust.
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder DisableAccessTokenEncryption()
+            => Configure(options => options.DisableAccessTokenEncryption = true);
 
         /// <summary>
         /// Disables authorization storage so that ad-hoc authorizations are
@@ -1520,22 +1626,14 @@ namespace Microsoft.Extensions.DependencyInjection
             => Configure(options => options.DisableAuthorizationStorage = true);
 
         /// <summary>
-        /// Disables sliding expiration. When using this option, refresh tokens
-        /// are issued with a fixed expiration date: when they expire, a complete
-        /// authorization flow must be started to retrieve a new refresh token.
+        /// Configures OpenIddict to disable rolling refresh tokens so
+        /// that refresh tokens used in a token request are not marked
+        /// as redeemed and can still be used until they expire. Disabling
+        /// rolling refresh tokens is NOT recommended, for security reasons.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder DisableSlidingExpiration()
-            => Configure(options => options.UseSlidingExpiration = false);
-
-        /// <summary>
-        /// Disables token storage, so that authorization code and
-        /// refresh tokens are never stored and cannot be revoked.
-        /// Using this option is generally NOT recommended.
-        /// </summary>
-        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder DisableTokenStorage()
-            => Configure(options => options.DisableTokenStorage = true);
+        public OpenIddictServerBuilder DisableRollingRefreshTokens()
+            => Configure(options => options.DisableRollingRefreshTokens = true);
 
         /// <summary>
         /// Allows processing authorization and token requests that specify scopes that have not
@@ -1544,6 +1642,27 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder DisableScopeValidation()
             => Configure(options => options.DisableScopeValidation = true);
+
+        /// <summary>
+        /// Disables sliding expiration. When using this option, refresh tokens
+        /// are issued with a fixed expiration date: when they expire, a complete
+        /// authorization flow must be started to retrieve a new refresh token.
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder DisableSlidingRefreshTokenExpiration()
+            => Configure(options => options.DisableSlidingRefreshTokenExpiration = true);
+
+        /// <summary>
+        /// Disables token storage, so that no database entry is created
+        /// for the tokens and codes returned by the OpenIddict server.
+        /// Using this option is generally NOT recommended as it prevents
+        /// the tokens and codes from being revoked (if needed).
+        /// Note: disabling token storage requires disabling sliding
+        /// expiration or enabling rolling tokens.
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder DisableTokenStorage()
+            => Configure(options => options.DisableTokenStorage = true);
 
         /// <summary>
         /// Enables the degraded mode. When the degraded mode is enabled, all the security checks that
@@ -1556,24 +1675,28 @@ namespace Microsoft.Extensions.DependencyInjection
             => Configure(options => options.EnableDegradedMode = true);
 
         /// <summary>
-        /// Disables endpoint permissions enforcement. Calling this method is NOT recommended,
-        /// unless all the clients are first-party applications you own, control and fully trust.
+        /// Disables endpoint permissions enforcement. Calling this method is NOT recommended.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder IgnoreEndpointPermissions()
             => Configure(options => options.IgnoreEndpointPermissions = true);
 
         /// <summary>
-        /// Disables grant type permissions enforcement. Calling this method is NOT recommended,
-        /// unless all the clients are first-party applications you own, control and fully trust.
+        /// Disables grant type permissions enforcement. Calling this method is NOT recommended.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder IgnoreGrantTypePermissions()
             => Configure(options => options.IgnoreGrantTypePermissions = true);
 
         /// <summary>
-        /// Disables scope permissions enforcement. Calling this method is NOT recommended,
-        /// unless all the clients are first-party applications you own, control and fully trust.
+        /// Disables response type permissions enforcement. Calling this method is NOT recommended.
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder IgnoreResponseTypePermissions()
+            => Configure(options => options.IgnoreResponseTypePermissions = true);
+
+        /// <summary>
+        /// Disables scope permissions enforcement. Calling this method is NOT recommended.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
         public OpenIddictServerBuilder IgnoreScopePermissions()
@@ -1585,16 +1708,16 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="claims">The supported claims.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder RegisterClaims([NotNull] params string[] claims)
+        public OpenIddictServerBuilder RegisterClaims(params string[] claims)
         {
-            if (claims == null)
+            if (claims is null)
             {
                 throw new ArgumentNullException(nameof(claims));
             }
 
             if (claims.Any(claim => string.IsNullOrEmpty(claim)))
             {
-                throw new ArgumentException("Claims cannot be null or empty.", nameof(claims));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0073), nameof(claims));
             }
 
             return Configure(options => options.Claims.UnionWith(claims));
@@ -1606,20 +1729,29 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="scopes">The supported scopes.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder RegisterScopes([NotNull] params string[] scopes)
+        public OpenIddictServerBuilder RegisterScopes(params string[] scopes)
         {
-            if (scopes == null)
+            if (scopes is null)
             {
                 throw new ArgumentNullException(nameof(scopes));
             }
 
             if (scopes.Any(scope => string.IsNullOrEmpty(scope)))
             {
-                throw new ArgumentException("Scopes cannot be null or empty.", nameof(scopes));
+                throw new ArgumentException(SR.GetResourceString(SR.ID0074), nameof(scopes));
             }
 
             return Configure(options => options.Scopes.UnionWith(scopes));
         }
+
+        /// <summary>
+        /// Configures OpenIddict to force client applications to use Proof Key for Code Exchange
+        /// (PKCE) when requesting an authorization code (e.g when using the code or hybrid flows).
+        /// When enforced, authorization requests that lack the code_challenge will be rejected.
+        /// </summary>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder RequireProofKeyForCodeExchange()
+            => Configure(options => options.RequireProofKeyForCodeExchange = true);
 
         /// <summary>
         /// Sets the access token lifetime, after which client applications must retrieve
@@ -1630,7 +1762,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="lifetime">The access token lifetime.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetAccessTokenLifetime([CanBeNull] TimeSpan? lifetime)
+        public OpenIddictServerBuilder SetAccessTokenLifetime(TimeSpan? lifetime)
             => Configure(options => options.AccessTokenLifetime = lifetime);
 
         /// <summary>
@@ -1641,8 +1773,19 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="lifetime">The authorization code lifetime.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetAuthorizationCodeLifetime([CanBeNull] TimeSpan? lifetime)
+        public OpenIddictServerBuilder SetAuthorizationCodeLifetime(TimeSpan? lifetime)
             => Configure(options => options.AuthorizationCodeLifetime = lifetime);
+
+        /// <summary>
+        /// Sets the device code lifetime, after which client applications are unable to
+        /// send a grant_type=urn:ietf:params:oauth:grant-type:device_code token request.
+        /// Using short-lived device codes is strongly recommended.
+        /// While discouraged, <c>null</c> can be specified to issue codes that never expire.
+        /// </summary>
+        /// <param name="lifetime">The authorization code lifetime.</param>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder SetDeviceCodeLifetime(TimeSpan? lifetime)
+            => Configure(options => options.DeviceCodeLifetime = lifetime);
 
         /// <summary>
         /// Sets the identity token lifetime, after which client
@@ -1651,7 +1794,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="lifetime">The identity token lifetime.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetIdentityTokenLifetime([CanBeNull] TimeSpan? lifetime)
+        public OpenIddictServerBuilder SetIdentityTokenLifetime(TimeSpan? lifetime)
             => Configure(options => options.IdentityTokenLifetime = lifetime);
 
         /// <summary>
@@ -1663,8 +1806,27 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="lifetime">The refresh token lifetime.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetRefreshTokenLifetime([CanBeNull] TimeSpan? lifetime)
+        public OpenIddictServerBuilder SetRefreshTokenLifetime(TimeSpan? lifetime)
             => Configure(options => options.RefreshTokenLifetime = lifetime);
+
+        /// <summary>
+        /// Sets the refresh token reuse leeway, during which rolling refresh tokens marked
+        /// as redeemed can still be used to make concurrent refresh token requests.
+        /// </summary>
+        /// <param name="leeway">The refresh token reuse interval.</param>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder SetRefreshTokenReuseLeeway(TimeSpan? leeway)
+            => Configure(options => options.RefreshTokenReuseLeeway = leeway);
+
+        /// <summary>
+        /// Sets the user code lifetime, after which they'll no longer be considered valid.
+        /// Using short-lived device codes is strongly recommended.
+        /// While discouraged, <c>null</c> can be specified to issue codes that never expire.
+        /// </summary>
+        /// <param name="lifetime">The authorization code lifetime.</param>
+        /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+        public OpenIddictServerBuilder SetUserCodeLifetime(TimeSpan? lifetime)
+            => Configure(options => options.UserCodeLifetime = lifetime);
 
         /// <summary>
         /// Sets the issuer address, which is used as the base address
@@ -1672,9 +1834,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="address">The issuer address.</param>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder SetIssuer([NotNull] Uri address)
+        public OpenIddictServerBuilder SetIssuer(Uri address)
         {
-            if (address == null)
+            if (address is null)
             {
                 throw new ArgumentNullException(nameof(address));
             }
@@ -1683,47 +1845,37 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Configures OpenIddict to use reference tokens, so that authorization codes,
-        /// access tokens and refresh tokens are stored as ciphertext in the database
-        /// (only an identifier is returned to the client application). Enabling this option
-        /// is useful to keep track of all the issued tokens, when storing a very large
-        /// number of claims in the authorization codes, access tokens and refresh tokens
-        /// or when immediate revocation of reference access tokens is desired.
-        /// Note: this option cannot be used when configuring JWT as the access token format.
+        /// Configures OpenIddict to use reference tokens, so that the access token payloads
+        /// are stored in the database (only an identifier is returned to the client application).
+        /// Enabling this option is useful when storing a very large number of claims in the tokens,
+        /// but it is RECOMMENDED to enable column encryption in the database or use the ASP.NET Core
+        /// Data Protection integration, that provides additional protection against token leakage.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder UseReferenceTokens()
-            => Configure(options => options.UseReferenceTokens = true);
+        public OpenIddictServerBuilder UseReferenceAccessTokens()
+            => Configure(options => options.UseReferenceAccessTokens = true);
 
         /// <summary>
-        /// Configures OpenIddict to use rolling refresh tokens. When this option is enabled,
-        /// a new refresh token is always issued for each refresh token request (and the previous
-        /// one is automatically revoked unless token revocation was explicitly disabled).
+        /// Configures OpenIddict to use reference tokens, so that the refresh token payloads
+        /// are stored in the database (only an identifier is returned to the client application).
+        /// Enabling this option is useful when storing a very large number of claims in the tokens,
+        /// but it is RECOMMENDED to enable column encryption in the database or use the ASP.NET Core
+        /// Data Protection integration, that provides additional protection against token leakage.
         /// </summary>
         /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
-        public OpenIddictServerBuilder UseRollingTokens()
-            => Configure(options => options.UseRollingTokens = true);
+        public OpenIddictServerBuilder UseReferenceRefreshTokens()
+            => Configure(options => options.UseReferenceRefreshTokens = true);
 
-        /// <summary>
-        /// Determines whether the specified object is equal to the current object.
-        /// </summary>
-        /// <param name="obj">The object to compare with the current object.</param>
-        /// <returns><c>true</c> if the specified object is equal to the current object; otherwise, false.</returns>
+        /// <inheritdoc/>
         [EditorBrowsable(EditorBrowsableState.Never)]
-        public override bool Equals([CanBeNull] object obj) => base.Equals(obj);
+        public override bool Equals(object? obj) => base.Equals(obj);
 
-        /// <summary>
-        /// Serves as the default hash function.
-        /// </summary>
-        /// <returns>A hash code for the current object.</returns>
+        /// <inheritdoc/>
         [EditorBrowsable(EditorBrowsableState.Never)]
         public override int GetHashCode() => base.GetHashCode();
 
-        /// <summary>
-        /// Returns a string that represents the current object.
-        /// </summary>
-        /// <returns>A string that represents the current object.</returns>
+        /// <inheritdoc/>
         [EditorBrowsable(EditorBrowsableState.Never)]
-        public override string ToString() => base.ToString();
+        public override string? ToString() => base.ToString();
     }
 }

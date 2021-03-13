@@ -4,8 +4,6 @@
  * the license and the contributors participating to this project.
  */
 
-using JetBrains.Annotations;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Owin;
 using Microsoft.Owin.Security.Infrastructure;
@@ -13,32 +11,32 @@ using Microsoft.Owin.Security.Infrastructure;
 namespace OpenIddict.Server.Owin
 {
     /// <summary>
-    /// Provides the entry point necessary to register the OpenIddict server in an OWIN pipeline.
+    /// Provides the entry point necessary to register the OpenIddict server handler in an OWIN pipeline.
     /// Note: this middleware is intented to be used with dependency injection containers
     /// that support middleware resolution, like Autofac. Since it depends on scoped services,
     /// it is NOT recommended to instantiate it as a singleton like a regular OWIN middleware.
     /// </summary>
     public class OpenIddictServerOwinMiddleware : AuthenticationMiddleware<OpenIddictServerOwinOptions>
     {
-        private readonly ILogger<OpenIddictServerOwinMiddleware> _logger;
-        private readonly IOpenIddictServerProvider _provider;
+        private readonly IOpenIddictServerDispatcher _dispatcher;
+        private readonly IOpenIddictServerFactory _factory;
 
         /// <summary>
         /// Creates a new instance of the <see cref="OpenIddictServerOwinMiddleware"/> class.
         /// </summary>
         /// <param name="next">The next middleware in the pipeline, if applicable.</param>
-        /// <param name="logger">The logger used by this middleware.</param>
         /// <param name="options">The OpenIddict server OWIN options.</param>
-        /// <param name="provider">The OpenIddict server provider.</param>
+        /// <param name="dispatcher">The OpenIddict server dispatcher.</param>
+        /// <param name="factory">The OpenIddict server factory.</param>
         public OpenIddictServerOwinMiddleware(
-            [CanBeNull] OwinMiddleware next,
-            [NotNull] ILogger<OpenIddictServerOwinMiddleware> logger,
-            [NotNull] IOptionsMonitor<OpenIddictServerOwinOptions> options,
-            [NotNull] IOpenIddictServerProvider provider)
+            OwinMiddleware? next,
+            IOptionsMonitor<OpenIddictServerOwinOptions> options,
+            IOpenIddictServerDispatcher dispatcher,
+            IOpenIddictServerFactory factory)
             : base(next, options.CurrentValue)
         {
-            _logger = logger;
-            _provider = provider;
+            _dispatcher = dispatcher;
+            _factory = factory;
         }
 
         /// <summary>
@@ -46,6 +44,6 @@ namespace OpenIddict.Server.Owin
         /// </summary>
         /// <returns>A new instance of the <see cref="OpenIddictServerOwinHandler"/> class.</returns>
         protected override AuthenticationHandler<OpenIddictServerOwinOptions> CreateHandler()
-            => new OpenIddictServerOwinHandler(_logger, _provider);
+            => new OpenIddictServerOwinHandler(_dispatcher, _factory);
     }
 }
