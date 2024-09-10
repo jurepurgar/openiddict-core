@@ -4,32 +4,49 @@
  * the license and the contributors participating to this project.
  */
 
-using System;
 using System.ComponentModel;
-using System.Threading.Tasks;
-using static OpenIddict.Validation.OpenIddictValidationEvents;
 
-namespace OpenIddict.Validation.SystemNetHttp
+namespace OpenIddict.Validation.SystemNetHttp;
+
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public static class OpenIddictValidationSystemNetHttpHandlerFilters
 {
-    [EditorBrowsable(EditorBrowsableState.Advanced)]
-    public static class OpenIddictValidationSystemNetHttpHandlerFilters
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if the URI is not an HTTP or HTTPS address.
+    /// </summary>
+    [Obsolete("This filter is obsolete and will be removed in a future version.")]
+    public sealed class RequireHttpMetadataUri : IOpenIddictValidationHandlerFilter<BaseExternalContext>
     {
-        /// <summary>
-        /// Represents a filter that excludes the associated handlers if the metadata address of the issuer is not available.
-        /// </summary>
-        public class RequireHttpMetadataAddress : IOpenIddictValidationHandlerFilter<BaseContext>
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseExternalContext context)
         {
-            public ValueTask<bool> IsActiveAsync(BaseContext context)
+            if (context is null)
             {
-                if (context is null)
-                {
-                    throw new ArgumentNullException(nameof(context));
-                }
-
-                return new ValueTask<bool>(
-                    string.Equals(context.Options.MetadataAddress?.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(context.Options.MetadataAddress?.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase));
+                throw new ArgumentNullException(nameof(context));
             }
+
+            return new(
+                string.Equals(context.RemoteUri?.Scheme, Uri.UriSchemeHttp,  StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(context.RemoteUri?.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if the URI is not an HTTP or HTTPS address.
+    /// </summary>
+    public sealed class RequireHttpUri : IOpenIddictValidationHandlerFilter<BaseExternalContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseExternalContext context)
+        {
+            if (context is null)
+            {
+                throw new ArgumentNullException(nameof(context));
+            }
+
+            return new(
+                string.Equals(context.RemoteUri?.Scheme, Uri.UriSchemeHttp,  StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(context.RemoteUri?.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase));
         }
     }
 }

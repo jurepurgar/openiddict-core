@@ -1,7 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;netstandard2.0;netstandard2.1</TargetFrameworks>
+    <TargetFrameworks>
+      $(NetFrameworkTargetFrameworks);
+      $(NetCoreTargetFrameworks);
+      $(NetStandardTargetFrameworks)
+    </TargetFrameworks>
     <GenerateResxSourceEmitFormatMethods>true</GenerateResxSourceEmitFormatMethods>
   </PropertyGroup>
 
@@ -12,15 +16,19 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Primitives" />
-    <PackageReference Include="System.Collections.Immutable" />
-    <PackageReference Include="System.Text.Encodings.Web" />
-    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" />
   </ItemGroup>
 
   <ItemGroup
     Condition=" ('$(TargetFrameworkIdentifier)' == '.NETFramework') Or
                 ('$(TargetFrameworkIdentifier)' == '.NETStandard' And $([MSBuild]::VersionLessThan($(TargetFrameworkVersion), '2.1'))) ">
     <PackageReference Include="Microsoft.Bcl.HashCode" />
+  </ItemGroup>
+
+  <ItemGroup
+    Condition=" ('$(TargetFrameworkIdentifier)' == '.NETFramework') Or
+                ('$(TargetFrameworkIdentifier)' == '.NETStandard') ">
+    <PackageReference Include="System.Collections.Immutable" />
   </ItemGroup>
 
   <ItemGroup Condition=" '$(TargetFrameworkIdentifier)' == '.NETFramework' ">
@@ -33,6 +41,12 @@
 
   <ItemGroup>
     <EmbeddedResource Update="**\*.resx" GenerateSource="true" GenerateResourcesCodeAsConstants="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="OpenIddict.Abstractions" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictConstants" Static="true" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictResources" Alias="SR" />
   </ItemGroup>
 
 </Project>

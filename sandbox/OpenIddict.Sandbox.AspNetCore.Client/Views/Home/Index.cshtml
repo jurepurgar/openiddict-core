@@ -1,0 +1,63 @@
+﻿@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication;
+@using OpenIddict.Client.AspNetCore;
+@using OpenIddict.Sandbox.AspNetCore.Client.ViewModels.Home;
+@using static OpenIddict.Abstractions.OpenIddictConstants;
+@model IndexViewModel
+
+<div class="jumbotron">
+    @if (User.Identity != null && User.Identity.IsAuthenticated)
+    {
+        <h1>Welcome, @User.Identity.Name</h1>
+
+        <p>
+            @foreach (var claim in Context.User.Claims)
+            {
+                <div>@claim.Type: <b>@claim.Value</b></div>
+            }
+        </p>
+
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <h3>Payload returned by the controller: @Model.Message</h3>
+        }
+
+        if (User.FindFirst(Claims.Private.ProviderName)?.Value is "Local")
+        {
+            <form asp-action="GetMessage" asp-controller="Home" method="post">
+                <button class="btn btn-lg btn-warning" type="submit">Query the resource controller</button>
+            </form>
+        }
+
+        if (!string.IsNullOrEmpty(await Context.GetTokenAsync(OpenIddictClientAspNetCoreConstants.Tokens.RefreshToken)))
+        {
+            <form asp-action="RefreshToken" asp-controller="Home" method="post">
+                <button class="btn btn-lg btn-warning" type="submit">Refresh the access token</button>
+            </form>
+        }
+
+        <form asp-action="Logout" asp-controller="Authentication" method="post">
+            <button class="btn btn-lg btn-danger" type="submit">Sign out</button>
+        </form>
+    }
+
+    else
+    {
+        <h1>Welcome, anonymous</h1>
+
+        <form asp-action="Login" asp-controller="Authentication" method="post">
+            <input type="hidden" name="returnUrl" value="@(Context.Request.PathBase + Context.Request.Path + Context.Request.QueryString)" />
+
+            <button class="btn btn-lg btn-success" type="submit" name="provider" value="Local+GitHub">
+                Sign in using Local OIDC server (preferred service: GitHub)
+            </button>
+
+            @foreach (var provider in Model.Providers)
+            {
+                <button class="btn btn-lg btn-success" type="submit" name="provider" value="@provider.ProviderName">
+                    Sign in using @provider.ProviderDisplayName
+                </button>
+            }
+        </form>
+    }
+</div>

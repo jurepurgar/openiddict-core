@@ -4,17 +4,19 @@
  * the license and the contributors participating to this project.
  */
 
-namespace OpenIddict.Server.AspNetCore
+using System.ComponentModel;
+
+namespace OpenIddict.Server.AspNetCore;
+
+/// <summary>
+/// Exposes the current server transaction to the ASP.NET Core host.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public sealed class OpenIddictServerAspNetCoreFeature
 {
     /// <summary>
-    /// Exposes the current server transaction to the ASP.NET Core host.
+    /// Gets or sets the server transaction that encapsulates all specific
+    /// information about an individual OpenID Connect server request.
     /// </summary>
-    public class OpenIddictServerAspNetCoreFeature
-    {
-        /// <summary>
-        /// Gets or sets the server transaction that encapsulates all specific
-        /// information about an individual OpenID Connect server request.
-        /// </summary>
-        public OpenIddictServerTransaction? Transaction { get; set; }
-    }
+    public OpenIddictServerTransaction? Transaction { get; set; }
 }

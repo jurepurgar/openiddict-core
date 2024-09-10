@@ -4,12 +4,23 @@
  * the license and the contributors participating to this project.
  */
 
-using System.Threading.Tasks;
+using System.ComponentModel;
 
-namespace OpenIddict.Server
+namespace OpenIddict.Server;
+
+/// <summary>
+/// Represents a service responsible for creating transactions.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
+public interface IOpenIddictServerFactory
 {
-    public interface IOpenIddictServerFactory
-    {
-        ValueTask<OpenIddictServerTransaction> CreateTransactionAsync();
-    }
+    /// <summary>
+    /// Creates a new <see cref="OpenIddictServerTransaction"/> that is used as a
+    /// way to store per-request data needed to process the requested operation.
+    /// </summary>
+    /// <returns>
+    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous
+    /// operation, whose result returns the created transaction.
+    /// </returns>
+    ValueTask<OpenIddictServerTransaction> CreateTransactionAsync();
 }

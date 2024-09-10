@@ -1,7 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;net472;netcoreapp2.1;netcoreapp3.1;net5.0;netstandard2.0;netstandard2.1</TargetFrameworks>
+    <TargetFrameworks>
+      $(NetFrameworkTargetFrameworks);
+      $(NetCoreTargetFrameworks);
+      $(NetStandardTargetFrameworks)
+    </TargetFrameworks>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -18,7 +22,17 @@ To use the validation feature on ASP.NET Core or OWIN/Katana, reference the Open
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging" />
-    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="OpenIddict.Abstractions" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictConstants" Static="true" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictResources" Alias="SR" />
+    <Using Include="OpenIddict.Validation.OpenIddictValidationEvents" Static="true" />
+    <Using Include="OpenIddict.Validation.OpenIddictValidationHandlers" Static="true" />
+    <Using Include="OpenIddict.Validation.OpenIddictValidationHandlerFilters" Static="true" />
   </ItemGroup>
 
 </Project>

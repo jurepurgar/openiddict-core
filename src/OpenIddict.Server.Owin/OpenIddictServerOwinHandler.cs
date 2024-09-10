@@ -4,330 +4,391 @@
  * the license and the contributors participating to this project.
  */
 
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
+using System.ComponentModel;
 using System.Security.Claims;
-using System.Threading.Tasks;
-using Microsoft.Owin;
-using Microsoft.Owin.Security;
 using Microsoft.Owin.Security.Infrastructure;
-using OpenIddict.Abstractions;
-using static OpenIddict.Abstractions.OpenIddictConstants;
-using static OpenIddict.Server.OpenIddictServerEvents;
-using SR = OpenIddict.Abstractions.OpenIddictResources;
+using static OpenIddict.Server.Owin.OpenIddictServerOwinConstants;
+using Properties = OpenIddict.Server.Owin.OpenIddictServerOwinConstants.Properties;
 
-namespace OpenIddict.Server.Owin
+namespace OpenIddict.Server.Owin;
+
+/// <summary>
+/// Provides the entry point necessary to register the OpenIddict server in an OWIN pipeline.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public sealed class OpenIddictServerOwinHandler : AuthenticationHandler<OpenIddictServerOwinOptions>
 {
+    private readonly IOpenIddictServerDispatcher _dispatcher;
+    private readonly IOpenIddictServerFactory _factory;
+
     /// <summary>
-    /// Provides the entry point necessary to register the OpenIddict server in an OWIN pipeline.
+    /// Creates a new instance of the <see cref="OpenIddictServerOwinHandler"/> class.
     /// </summary>
-    public class OpenIddictServerOwinHandler : AuthenticationHandler<OpenIddictServerOwinOptions>
+    /// <param name="dispatcher">The OpenIddict server dispatcher used by this instance.</param>
+    /// <param name="factory">The OpenIddict server factory used by this instance.</param>
+    public OpenIddictServerOwinHandler(
+        IOpenIddictServerDispatcher dispatcher,
+        IOpenIddictServerFactory factory)
     {
-        private readonly IOpenIddictServerDispatcher _dispatcher;
-        private readonly IOpenIddictServerFactory _factory;
+        _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+    }
 
-        /// <summary>
-        /// Creates a new instance of the <see cref="OpenIddictServerOwinHandler"/> class.
-        /// </summary>
-        /// <param name="dispatcher">The OpenIddict server dispatcher used by this instance.</param>
-        /// <param name="factory">The OpenIddict server factory used by this instance.</param>
-        public OpenIddictServerOwinHandler(
-            IOpenIddictServerDispatcher dispatcher,
-            IOpenIddictServerFactory factory)
+    /// <inheritdoc/>
+    protected override async Task InitializeCoreAsync()
+    {
+        // Note: the transaction may be already attached when replaying an OWIN request
+        // (e.g when using a status code pages middleware re-invoking the OWIN pipeline).
+        var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName);
+        if (transaction is null)
         {
-            _dispatcher = dispatcher;
-            _factory = factory;
+            // Create a new transaction and attach the OWIN request to make it available to the OWIN handlers.
+            transaction = await _factory.CreateTransactionAsync();
+            transaction.Properties[typeof(IOwinRequest).FullName!] = new WeakReference<IOwinRequest>(Request);
+
+            // Attach the OpenIddict server transaction to the OWIN shared dictionary
+            // so that it can retrieved while performing sign-in/sign-out operations.
+            Context.Set(typeof(OpenIddictServerTransaction).FullName, transaction);
         }
 
-        /// <inheritdoc/>
-        protected override async Task InitializeCoreAsync()
+        var context = new ProcessRequestContext(transaction)
         {
-            // Note: the transaction may be already attached when replaying an OWIN request
-            // (e.g when using a status code pages middleware re-invoking the OWIN pipeline).
-            var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName);
-            if (transaction is null)
+            CancellationToken = Request.CallCancelled
+        };
+
+        await _dispatcher.DispatchAsync(context);
+
+        // Store the context in the transaction so that it can be retrieved from InvokeAsync().
+        transaction.SetProperty(typeof(ProcessRequestContext).FullName!, context);
+    }
+
+    /// <inheritdoc/>
+    public override async Task<bool> InvokeAsync()
+    {
+        // Note: due to internal differences between ASP.NET Core and Katana, the request MUST start being processed
+        // in InitializeCoreAsync() to ensure the request context is available from AuthenticateCoreAsync() when
+        // active authentication is used, as AuthenticateCoreAsync() is always called before InvokeAsync() in this case.
+
+        var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName) ??
+            throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
+
+        var context = transaction.GetProperty<ProcessRequestContext>(typeof(ProcessRequestContext).FullName!) ??
+            throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
+
+        if (context.IsRequestHandled)
+        {
+            return true;
+        }
+
+        else if (context.IsRequestSkipped)
+        {
+            return false;
+        }
+
+        else if (context.IsRejected)
+        {
+            var notification = new ProcessErrorContext(transaction)
             {
-                // Create a new transaction and attach the OWIN request to make it available to the OWIN handlers.
-                transaction = await _factory.CreateTransactionAsync();
-                transaction.Properties[typeof(IOwinRequest).FullName!] = new WeakReference<IOwinRequest>(Request);
+                CancellationToken = Request.CallCancelled,
+                Error = context.Error ?? Errors.InvalidRequest,
+                ErrorDescription = context.ErrorDescription,
+                ErrorUri = context.ErrorUri,
+                Response = new OpenIddictResponse()
+            };
 
-                // Attach the OpenIddict server transaction to the OWIN shared dictionary
-                // so that it can retrieved while performing sign-in/sign-out operations.
-                Context.Set(typeof(OpenIddictServerTransaction).FullName, transaction);
-            }
+            await _dispatcher.DispatchAsync(notification);
 
-            var context = new ProcessRequestContext(transaction);
-            await _dispatcher.DispatchAsync(context);
-
-            // Store the context in the transaction so that it can be retrieved from InvokeAsync().
-            transaction.SetProperty(typeof(ProcessRequestContext).FullName!, context);
-        }
-
-        /// <inheritdoc/>
-        public override async Task<bool> InvokeAsync()
-        {
-            // Note: due to internal differences between ASP.NET Core and Katana, the request MUST start being processed
-            // in InitializeCoreAsync() to ensure the request context is available from AuthenticateCoreAsync() when
-            // active authentication is used, as AuthenticateCoreAsync() is always called before InvokeAsync() in this case.
-
-            var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName) ??
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
-
-            var context = transaction.GetProperty<ProcessRequestContext>(typeof(ProcessRequestContext).FullName!) ??
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
-
-            if (context.IsRequestHandled)
+            if (notification.IsRequestHandled)
             {
                 return true;
             }
 
-            else if (context.IsRequestSkipped)
+            else if (notification.IsRequestSkipped)
             {
                 return false;
+            }
+            throw new InvalidOperationException(SR.GetResourceString(SR.ID0111));
+
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc/>
+    protected override async Task<AuthenticationTicket?> AuthenticateCoreAsync()
+    {
+        var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName) ??
+            throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
+
+        // Note: in many cases, the authentication token was already validated by the time this action is called
+        // (generally later in the pipeline, when using the pass-through mode). To avoid having to re-validate it,
+        // the authentication context is resolved from the transaction. If it's not available, a new one is created.
+        var context = transaction.GetProperty<ProcessAuthenticationContext>(typeof(ProcessAuthenticationContext).FullName!);
+        if (context is null)
+        {
+            await _dispatcher.DispatchAsync(context = new ProcessAuthenticationContext(transaction)
+            {
+                CancellationToken = Request.CallCancelled
+            });
+
+            // Store the context object in the transaction so it can be later retrieved by handlers
+            // that want to access the authentication result without triggering a new authentication flow.
+            transaction.SetProperty(typeof(ProcessAuthenticationContext).FullName!, context);
+        }
+
+        if (context.IsRequestHandled || context.IsRequestSkipped)
+        {
+            return null;
+        }
+
+        else if (context.IsRejected)
+        {
+            // Note: the missing_token error is special-cased to indicate to Katana
+            // that no authentication result could be produced due to the lack of token.
+            // This also helps reducing the logging noise when no token is specified.
+            if (string.Equals(context.Error, Errors.MissingToken, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var properties = new AuthenticationProperties(new Dictionary<string, string?>
+            {
+                [Properties.Error] = context.Error,
+                [Properties.ErrorDescription] = context.ErrorDescription,
+                [Properties.ErrorUri] = context.ErrorUri
+            });
+
+            return new AuthenticationTicket(null, properties);
+        }
+
+        else
+        {
+            // A single main claims-based principal instance can be attached to an authentication ticket.
+            var principal = context.EndpointType switch
+            {
+                OpenIddictServerEndpointType.Authorization or OpenIddictServerEndpointType.EndSession
+                    => context.IdentityTokenPrincipal,
+
+                OpenIddictServerEndpointType.EndUserVerification => context.UserCodePrincipal,
+
+                OpenIddictServerEndpointType.Introspection or OpenIddictServerEndpointType.Revocation
+                    => context.AccessTokenPrincipal       ??
+                       context.RefreshTokenPrincipal      ??
+                       context.IdentityTokenPrincipal     ??
+                       context.AuthorizationCodePrincipal ??
+                       context.DeviceCodePrincipal        ??
+                       context.UserCodePrincipal,
+
+                OpenIddictServerEndpointType.Token when context.Request.IsAuthorizationCodeGrantType()
+                    => context.AuthorizationCodePrincipal,
+                OpenIddictServerEndpointType.Token when context.Request.IsDeviceCodeGrantType()
+                    => context.DeviceCodePrincipal,
+                OpenIddictServerEndpointType.Token when context.Request.IsRefreshTokenGrantType()
+                    => context.RefreshTokenPrincipal,
+
+                OpenIddictServerEndpointType.UserInfo => context.AccessTokenPrincipal,
+
+                _ => null
+            };
+
+            var properties = new AuthenticationProperties
+            {
+                ExpiresUtc = principal?.GetExpirationDate(),
+                IssuedUtc = principal?.GetCreationDate()
+            };
+
+            foreach (var property in context.Properties)
+            {
+                properties.Dictionary[property.Key] = property.Value;
+            }
+
+            // Attach the tokens to allow any OWIN component (e.g a controller)
+            // to retrieve them (e.g to make an API request to another application).
+
+            if (!string.IsNullOrEmpty(context.AccessToken))
+            {
+                properties.Dictionary[Tokens.AccessToken] = context.AccessToken;
+            }
+
+            if (!string.IsNullOrEmpty(context.AuthorizationCode))
+            {
+                properties.Dictionary[Tokens.AuthorizationCode] = context.AuthorizationCode;
+            }
+
+            if (!string.IsNullOrEmpty(context.ClientAssertion))
+            {
+                properties.Dictionary[Tokens.ClientAssertion] = context.ClientAssertion;
+            }
+
+            if (!string.IsNullOrEmpty(context.DeviceCode))
+            {
+                properties.Dictionary[Tokens.DeviceCode] = context.DeviceCode;
+            }
+
+            if (!string.IsNullOrEmpty(context.IdentityToken))
+            {
+                properties.Dictionary[Tokens.IdentityToken] = context.IdentityToken;
+            }
+
+            if (!string.IsNullOrEmpty(context.RefreshToken))
+            {
+                properties.Dictionary[Tokens.RefreshToken] = context.RefreshToken;
+            }
+
+            if (!string.IsNullOrEmpty(context.UserCode))
+            {
+                properties.Dictionary[Tokens.UserCode] = context.UserCode;
+            }
+
+            return new AuthenticationTicket(principal?.Identity as ClaimsIdentity, properties);
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override async Task TeardownCoreAsync()
+    {
+        // Note: OWIN authentication handlers cannot reliably write to the response stream
+        // from ApplyResponseGrantAsync() or ApplyResponseChallengeAsync() because these methods
+        // are susceptible to be invoked from AuthenticationHandler.OnSendingHeaderCallback(),
+        // where calling Write() or WriteAsync() on the response stream may result in a deadlock
+        // on hosts using streamed responses. To work around this limitation, this handler
+        // doesn't implement ApplyResponseGrantAsync() but TeardownCoreAsync(), which is never
+        // called by AuthenticationHandler.OnSendingHeaderCallback(). In theory, this would prevent
+        // OpenIddictServerOwinMiddleware from both applying the response grant and allowing
+        // the next middleware in the pipeline to alter the response stream but in practice,
+        // OpenIddictServerOwinMiddleware is assumed to be the only middleware allowed to write
+        // to the response stream when a response grant (sign-in/out or challenge) was applied.
+
+        // Note: unlike the ASP.NET Core host, the OWIN host MUST check whether the status code
+        // corresponds to a challenge response, as LookupChallenge() will always return a non-null
+        // value when active authentication is used, even if no challenge was actually triggered.
+        var challenge = Helper.LookupChallenge(Options.AuthenticationType, Options.AuthenticationMode);
+        if (challenge is not null && Response.StatusCode is 401 or 403)
+        {
+            var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName) ??
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
+
+            transaction.Properties[typeof(AuthenticationProperties).FullName!] = challenge.Properties ?? new AuthenticationProperties();
+
+            var context = new ProcessChallengeContext(transaction)
+            {
+                CancellationToken = Request.CallCancelled,
+                Response = new OpenIddictResponse()
+            };
+
+            await _dispatcher.DispatchAsync(context);
+
+            if (context.IsRequestHandled || context.IsRequestSkipped)
+            {
+                return;
             }
 
             else if (context.IsRejected)
             {
                 var notification = new ProcessErrorContext(transaction)
                 {
-                    Response = new OpenIddictResponse
-                    {
-                        Error = context.Error ?? Errors.InvalidRequest,
-                        ErrorDescription = context.ErrorDescription,
-                        ErrorUri = context.ErrorUri
-                    }
+                    CancellationToken = Request.CallCancelled,
+                    Error = context.Error ?? Errors.InvalidRequest,
+                    ErrorDescription = context.ErrorDescription,
+                    ErrorUri = context.ErrorUri,
+                    Response = new OpenIddictResponse()
                 };
 
                 await _dispatcher.DispatchAsync(notification);
 
-                if (notification.IsRequestHandled)
+                if (notification.IsRequestHandled || context.IsRequestSkipped)
                 {
-                    return true;
+                    return;
                 }
 
-                else if (notification.IsRequestSkipped)
-                {
-                    return false;
-                }
                 throw new InvalidOperationException(SR.GetResourceString(SR.ID0111));
-
             }
-
-            return false;
         }
 
-        /// <inheritdoc/>
-        protected override async Task<AuthenticationTicket?> AuthenticateCoreAsync()
+        var signin = Helper.LookupSignIn(Options.AuthenticationType);
+        if (signin is not null)
         {
-            var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName);
-            if (transaction is null)
-            {
+            var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName) ??
                 throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
-            }
 
-            // Note: in many cases, the authentication token was already validated by the time this action is called
-            // (generally later in the pipeline, when using the pass-through mode). To avoid having to re-validate it,
-            // the authentication context is resolved from the transaction. If it's not available, a new one is created.
-            var context = transaction.GetProperty<ProcessAuthenticationContext>(typeof(ProcessAuthenticationContext).FullName!);
-            if (context is null)
+            transaction.Properties[typeof(AuthenticationProperties).FullName!] = signin.Properties ?? new AuthenticationProperties();
+
+            var context = new ProcessSignInContext(transaction)
             {
-                context = new ProcessAuthenticationContext(transaction);
-                await _dispatcher.DispatchAsync(context);
+                CancellationToken = Request.CallCancelled,
+                Principal = signin.Principal,
+                Response = new OpenIddictResponse()
+            };
 
-                // Store the context object in the transaction so it can be later retrieved by handlers
-                // that want to access the authentication result without triggering a new authentication flow.
-                transaction.SetProperty(typeof(ProcessAuthenticationContext).FullName!, context);
-            }
+            await _dispatcher.DispatchAsync(context);
 
             if (context.IsRequestHandled || context.IsRequestSkipped)
             {
-                return null;
+                return;
             }
 
             else if (context.IsRejected)
             {
-                // Note: the missing_token error is special-cased to indicate to Katana
-                // that no authentication result could be produced due to the lack of token.
-                // This also helps reducing the logging noise when no token is specified.
-                if (string.Equals(context.Error, Errors.MissingToken, StringComparison.Ordinal))
+                var notification = new ProcessErrorContext(transaction)
                 {
-                    return null;
+                    CancellationToken = Request.CallCancelled,
+                    Error = context.Error ?? Errors.InvalidRequest,
+                    ErrorDescription = context.ErrorDescription,
+                    ErrorUri = context.ErrorUri,
+                    Response = new OpenIddictResponse()
+                };
+
+                await _dispatcher.DispatchAsync(notification);
+
+                if (notification.IsRequestHandled || context.IsRequestSkipped)
+                {
+                    return;
                 }
 
-                var properties = new AuthenticationProperties(new Dictionary<string, string?>
-                {
-                    [OpenIddictServerOwinConstants.Properties.Error] = context.Error,
-                    [OpenIddictServerOwinConstants.Properties.ErrorDescription] = context.ErrorDescription,
-                    [OpenIddictServerOwinConstants.Properties.ErrorUri] = context.ErrorUri
-                });
-
-                return new AuthenticationTicket(null, properties);
-            }
-
-            else
-            {
-                Debug.Assert(context.Principal is { Identity: ClaimsIdentity }, SR.GetResourceString(SR.ID4006));
-                Debug.Assert(!string.IsNullOrEmpty(context.Principal.GetTokenType()), SR.GetResourceString(SR.ID4009));
-                Debug.Assert(!string.IsNullOrEmpty(context.Token), SR.GetResourceString(SR.ID4010));
-
-                // Store the token to allow any OWIN/Katana component (e.g a controller)
-                // to retrieve it (e.g to make an API request to another application).
-                var properties = new AuthenticationProperties(new Dictionary<string, string?>
-                {
-                    [context.Principal.GetTokenType()!] = context.Token
-                });
-
-                return new AuthenticationTicket((ClaimsIdentity) context.Principal.Identity, properties);
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0111));
             }
         }
 
-        /// <inheritdoc/>
-        protected override async Task TeardownCoreAsync()
+        var signout = Helper.LookupSignOut(Options.AuthenticationType, Options.AuthenticationMode);
+        if (signout is not null)
         {
-            // Note: OWIN authentication handlers cannot reliabily write to the response stream
-            // from ApplyResponseGrantAsync or ApplyResponseChallengeAsync because these methods
-            // are susceptible to be invoked from AuthenticationHandler.OnSendingHeaderCallback,
-            // where calling Write or WriteAsync on the response stream may result in a deadlock
-            // on hosts using streamed responses. To work around this limitation, this handler
-            // doesn't implement ApplyResponseGrantAsync but TeardownCoreAsync, which is never called
-            // by AuthenticationHandler.OnSendingHeaderCallback. In theory, this would prevent
-            // OpenIddictServerOwinMiddleware from both applying the response grant and allowing
-            // the next middleware in the pipeline to alter the response stream but in practice,
-            // OpenIddictServerOwinMiddleware is assumed to be the only middleware allowed to write
-            // to the response stream when a response grant (sign-in/out or challenge) was applied.
+            var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName) ??
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
 
-            // Note: unlike the ASP.NET Core host, the OWIN host MUST check whether the status code
-            // corresponds to a challenge response, as LookupChallenge() will always return a non-null
-            // value when active authentication is used, even if no challenge was actually triggered.
-            var challenge = Helper.LookupChallenge(Options.AuthenticationType, Options.AuthenticationMode);
-            if (challenge is not null && (Response.StatusCode == 401 || Response.StatusCode == 403))
+            transaction.Properties[typeof(AuthenticationProperties).FullName!] = signout.Properties ?? new AuthenticationProperties();
+
+            var context = new ProcessSignOutContext(transaction)
             {
-                var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName) ??
-                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
+                CancellationToken = Request.CallCancelled,
+                Response = new OpenIddictResponse()
+            };
 
-                transaction.Properties[typeof(AuthenticationProperties).FullName!] = challenge.Properties ?? new AuthenticationProperties();
+            await _dispatcher.DispatchAsync(context);
 
-                var context = new ProcessChallengeContext(transaction)
-                {
-                    Response = new OpenIddictResponse()
-                };
-
-                await _dispatcher.DispatchAsync(context);
-
-                if (context.IsRequestHandled || context.IsRequestSkipped)
-                {
-                    return;
-                }
-
-                else if (context.IsRejected)
-                {
-                    var notification = new ProcessErrorContext(transaction)
-                    {
-                        Response = new OpenIddictResponse
-                        {
-                            Error = context.Error ?? Errors.InvalidRequest,
-                            ErrorDescription = context.ErrorDescription,
-                            ErrorUri = context.ErrorUri
-                        }
-                    };
-
-                    await _dispatcher.DispatchAsync(notification);
-
-                    if (notification.IsRequestHandled || context.IsRequestSkipped)
-                    {
-                        return;
-                    }
-
-                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0111));
-                }
+            if (context.IsRequestHandled || context.IsRequestSkipped)
+            {
+                return;
             }
 
-            var signin = Helper.LookupSignIn(Options.AuthenticationType);
-            if (signin is not null)
+            else if (context.IsRejected)
             {
-                var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName) ??
-                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
-
-                transaction.Properties[typeof(AuthenticationProperties).FullName!] = signin.Properties ?? new AuthenticationProperties();
-
-                var context = new ProcessSignInContext(transaction)
+                var notification = new ProcessErrorContext(transaction)
                 {
-                    Principal = signin.Principal,
+                    CancellationToken = Request.CallCancelled,
+                    Error = context.Error ?? Errors.InvalidRequest,
+                    ErrorDescription = context.ErrorDescription,
+                    ErrorUri = context.ErrorUri,
                     Response = new OpenIddictResponse()
                 };
 
-                await _dispatcher.DispatchAsync(context);
+                await _dispatcher.DispatchAsync(notification);
 
-                if (context.IsRequestHandled || context.IsRequestSkipped)
+                if (notification.IsRequestHandled || context.IsRequestSkipped)
                 {
                     return;
                 }
 
-                else if (context.IsRejected)
-                {
-                    var notification = new ProcessErrorContext(transaction)
-                    {
-                        Response = new OpenIddictResponse
-                        {
-                            Error = context.Error ?? Errors.InvalidRequest,
-                            ErrorDescription = context.ErrorDescription,
-                            ErrorUri = context.ErrorUri
-                        }
-                    };
-
-                    await _dispatcher.DispatchAsync(notification);
-
-                    if (notification.IsRequestHandled || context.IsRequestSkipped)
-                    {
-                        return;
-                    }
-
-                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0111));
-                }
-            }
-
-            var signout = Helper.LookupSignOut(Options.AuthenticationType, Options.AuthenticationMode);
-            if (signout is not null)
-            {
-                var transaction = Context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName) ??
-                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0112));
-
-                transaction.Properties[typeof(AuthenticationProperties).FullName!] = signout.Properties ?? new AuthenticationProperties();
-
-                var context = new ProcessSignOutContext(transaction)
-                {
-                    Response = new OpenIddictResponse()
-                };
-
-                await _dispatcher.DispatchAsync(context);
-
-                if (context.IsRequestHandled || context.IsRequestSkipped)
-                {
-                    return;
-                }
-
-                else if (context.IsRejected)
-                {
-                    var notification = new ProcessErrorContext(transaction)
-                    {
-                        Response = new OpenIddictResponse
-                        {
-                            Error = context.Error ?? Errors.InvalidRequest,
-                            ErrorDescription = context.ErrorDescription,
-                            ErrorUri = context.ErrorUri
-                        }
-                    };
-
-                    await _dispatcher.DispatchAsync(notification);
-
-                    if (notification.IsRequestHandled || context.IsRequestSkipped)
-                    {
-                        return;
-                    }
-
-                    throw new InvalidOperationException(SR.GetResourceString(SR.ID0111));
-                }
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0111));
             }
         }
     }

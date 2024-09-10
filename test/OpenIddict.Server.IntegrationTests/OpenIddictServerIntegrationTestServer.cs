@@ -4,18 +4,14 @@
  * the license and the contributors participating to this project.
  */
 
-using System;
-using System.Threading.Tasks;
+namespace OpenIddict.Server.IntegrationTests;
 
-namespace OpenIddict.Server.IntegrationTests
+/// <summary>
+/// Represents a test host used by the server integration tests.
+/// </summary>
+public abstract class OpenIddictServerIntegrationTestServer : IAsyncDisposable
 {
-    /// <summary>
-    /// Represents a test host used by the server integration tests.
-    /// </summary>
-    public abstract class OpenIddictServerIntegrationTestServer : IAsyncDisposable
-    {
-        public abstract ValueTask<OpenIddictServerIntegrationTestClient> CreateClientAsync();
+    public abstract ValueTask<OpenIddictServerIntegrationTestClient> CreateClientAsync();
 
-        public virtual ValueTask DisposeAsync() => default;
-    }
+    public virtual ValueTask DisposeAsync() => default;
 }

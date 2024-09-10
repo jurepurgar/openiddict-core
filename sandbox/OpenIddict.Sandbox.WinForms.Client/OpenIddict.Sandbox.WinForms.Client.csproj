@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFrameworks>net48</TargetFrameworks>
+    <TargetFrameworks Condition=" '$(SupportsWindowsTargeting)' == 'true' ">$(TargetFrameworks);net8.0-windows7.0</TargetFrameworks>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\OpenIddict.Client.SystemIntegration\OpenIddict.Client.SystemIntegration.csproj" />
+    <ProjectReference Include="..\..\src\OpenIddict.Client.SystemNetHttp\OpenIddict.Client.SystemNetHttp.csproj" />
+    <ProjectReference Include="..\..\src\OpenIddict.Client.WebIntegration\OpenIddict.Client.WebIntegration.csproj" />
+    <ProjectReference Include="..\..\src\OpenIddict.EntityFrameworkCore\OpenIddict.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapplo.Microsoft.Extensions.Hosting.AppServices" />
+    <PackageReference Include="Dapplo.Microsoft.Extensions.Hosting.WinForms" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+  </ItemGroup>
+
+</Project>

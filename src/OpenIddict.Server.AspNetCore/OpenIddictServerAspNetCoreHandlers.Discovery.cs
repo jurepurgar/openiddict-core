@@ -5,38 +5,37 @@
  */
 
 using System.Collections.Immutable;
-using static OpenIddict.Server.OpenIddictServerEvents;
 
-namespace OpenIddict.Server.AspNetCore
+namespace OpenIddict.Server.AspNetCore;
+
+public static partial class OpenIddictServerAspNetCoreHandlers
 {
-    public static partial class OpenIddictServerAspNetCoreHandlers
+    public static class Discovery
     {
-        public static class Discovery
-        {
-            public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
-                /*
-                 * Configuration request extraction:
-                 */
-                ExtractGetRequest<ExtractConfigurationRequestContext>.Descriptor,
+        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create([
+            /*
+             * Configuration request extraction:
+             */
+            ExtractGetRequest<ExtractConfigurationRequestContext>.Descriptor,
 
-                /*
-                 * Configuration response processing:
-                 */
-                AttachHttpResponseCode<ApplyConfigurationResponseContext>.Descriptor,
-                AttachWwwAuthenticateHeader<ApplyConfigurationResponseContext>.Descriptor,
-                ProcessJsonResponse<ApplyConfigurationResponseContext>.Descriptor,
+            /*
+             * Configuration response processing:
+             */
+            AttachHttpResponseCode<ApplyConfigurationResponseContext>.Descriptor,
+            AttachWwwAuthenticateHeader<ApplyConfigurationResponseContext>.Descriptor,
+            ProcessJsonResponse<ApplyConfigurationResponseContext>.Descriptor,
 
-                /*
-                 * Cryptography request extraction:
-                 */
-                ExtractGetRequest<ExtractCryptographyRequestContext>.Descriptor,
+            /*
+             * Cryptography request extraction:
+             */
+            ExtractGetRequest<ExtractJsonWebKeySetRequestContext>.Descriptor,
 
-                /*
-                 * Cryptography response processing:
-                 */
-                AttachHttpResponseCode<ApplyCryptographyResponseContext>.Descriptor,
-                AttachWwwAuthenticateHeader<ApplyCryptographyResponseContext>.Descriptor,
-                ProcessJsonResponse<ApplyCryptographyResponseContext>.Descriptor);
-        }
+            /*
+             * Cryptography response processing:
+             */
+            AttachHttpResponseCode<ApplyJsonWebKeySetResponseContext>.Descriptor,
+            AttachWwwAuthenticateHeader<ApplyJsonWebKeySetResponseContext>.Descriptor,
+            ProcessJsonResponse<ApplyJsonWebKeySetResponseContext>.Descriptor
+        ]);
     }
 }

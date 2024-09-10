@@ -5,42 +5,57 @@
  */
 
 using System.Collections.Immutable;
-using static OpenIddict.Validation.OpenIddictValidationEvents;
 
-namespace OpenIddict.Validation.SystemNetHttp
+namespace OpenIddict.Validation.SystemNetHttp;
+
+public static partial class OpenIddictValidationSystemNetHttpHandlers
 {
-    public static partial class OpenIddictValidationSystemNetHttpHandlers
+    public static class Discovery
     {
-        public static class Discovery
-        {
-            public static ImmutableArray<OpenIddictValidationHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
-                /*
-                 * Configuration request processing:
-                 */
-                PrepareGetHttpRequest<PrepareConfigurationRequestContext>.Descriptor,
-                AttachQueryStringParameters<PrepareConfigurationRequestContext>.Descriptor,
-                SendHttpRequest<ApplyConfigurationRequestContext>.Descriptor,
-                DisposeHttpRequest<ApplyConfigurationRequestContext>.Descriptor,
+        public static ImmutableArray<OpenIddictValidationHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create([
+            /*
+             * Configuration request processing:
+             */
+            CreateHttpClient<PrepareConfigurationRequestContext>.Descriptor,
+            PrepareGetHttpRequest<PrepareConfigurationRequestContext>.Descriptor,
+            AttachHttpVersion<PrepareConfigurationRequestContext>.Descriptor,
+            AttachJsonAcceptHeaders<PrepareConfigurationRequestContext>.Descriptor,
+            AttachUserAgentHeader<PrepareConfigurationRequestContext>.Descriptor,
+            AttachFromHeader<PrepareConfigurationRequestContext>.Descriptor,
+            AttachHttpParameters<PrepareConfigurationRequestContext>.Descriptor,
+            SendHttpRequest<ApplyConfigurationRequestContext>.Descriptor,
+            DisposeHttpRequest<ApplyConfigurationRequestContext>.Descriptor,
 
-                /*
-                 * Configuration response processing:
-                 */
-                ExtractJsonHttpResponse<ExtractConfigurationResponseContext>.Descriptor,
-                DisposeHttpResponse<ExtractConfigurationResponseContext>.Descriptor,
+            /*
+             * Configuration response processing:
+             */
+            DecompressResponseContent<ExtractConfigurationResponseContext>.Descriptor,
+            ExtractJsonHttpResponse<ExtractConfigurationResponseContext>.Descriptor,
+            ExtractWwwAuthenticateHeader<ExtractConfigurationResponseContext>.Descriptor,
+            ValidateHttpResponse<ExtractConfigurationResponseContext>.Descriptor,
+            DisposeHttpResponse<ExtractConfigurationResponseContext>.Descriptor,
 
-                /*
-                 * Cryptography request processing:
-                 */
-                PrepareGetHttpRequest<PrepareCryptographyRequestContext>.Descriptor,
-                AttachQueryStringParameters<PrepareCryptographyRequestContext>.Descriptor,
-                SendHttpRequest<ApplyCryptographyRequestContext>.Descriptor,
-                DisposeHttpRequest<ApplyCryptographyRequestContext>.Descriptor,
+            /*
+             * Cryptography request processing:
+             */
+            CreateHttpClient<PrepareJsonWebKeySetRequestContext>.Descriptor,
+            PrepareGetHttpRequest<PrepareJsonWebKeySetRequestContext>.Descriptor,
+            AttachHttpVersion<PrepareJsonWebKeySetRequestContext>.Descriptor,
+            AttachJsonAcceptHeaders<PrepareJsonWebKeySetRequestContext>.Descriptor,
+            AttachUserAgentHeader<PrepareJsonWebKeySetRequestContext>.Descriptor,
+            AttachFromHeader<PrepareJsonWebKeySetRequestContext>.Descriptor,
+            AttachHttpParameters<PrepareJsonWebKeySetRequestContext>.Descriptor,
+            SendHttpRequest<ApplyJsonWebKeySetRequestContext>.Descriptor,
+            DisposeHttpRequest<ApplyJsonWebKeySetRequestContext>.Descriptor,
 
-                /*
-                 * Configuration response processing:
-                 */
-                ExtractJsonHttpResponse<ExtractCryptographyResponseContext>.Descriptor,
-                DisposeHttpResponse<ExtractCryptographyResponseContext>.Descriptor);
-        }
+            /*
+             * Configuration response processing:
+             */
+            DecompressResponseContent<ExtractJsonWebKeySetResponseContext>.Descriptor,
+            ExtractJsonHttpResponse<ExtractJsonWebKeySetResponseContext>.Descriptor,
+            ExtractWwwAuthenticateHeader<ExtractJsonWebKeySetResponseContext>.Descriptor,
+            ValidateHttpResponse<ExtractJsonWebKeySetResponseContext>.Descriptor,
+            DisposeHttpResponse<ExtractJsonWebKeySetResponseContext>.Descriptor
+        ]);
     }
 }

@@ -5,27 +5,27 @@
  */
 
 using System.Collections.Immutable;
-using static OpenIddict.Server.OpenIddictServerEvents;
 
-namespace OpenIddict.Server.AspNetCore
+namespace OpenIddict.Server.AspNetCore;
+
+public static partial class OpenIddictServerAspNetCoreHandlers
 {
-    public static partial class OpenIddictServerAspNetCoreHandlers
+    public static class Introspection
     {
-        public static class Introspection
-        {
-            public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
-                /*
-                 * Introspection request extraction:
-                 */
-                ExtractGetOrPostRequest<ExtractIntrospectionRequestContext>.Descriptor,
-                ExtractBasicAuthenticationCredentials<ExtractIntrospectionRequestContext>.Descriptor,
+        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create([
+            /*
+             * Introspection request extraction:
+             */
+            ExtractGetOrPostRequest<ExtractIntrospectionRequestContext>.Descriptor,
+            ValidateClientAuthenticationMethod<ExtractIntrospectionRequestContext>.Descriptor,
+            ExtractBasicAuthenticationCredentials<ExtractIntrospectionRequestContext>.Descriptor,
 
-                /*
-                 * Introspection response processing:
-                 */
-                AttachHttpResponseCode<ApplyIntrospectionResponseContext>.Descriptor,
-                AttachWwwAuthenticateHeader<ApplyIntrospectionResponseContext>.Descriptor,
-                ProcessJsonResponse<ApplyIntrospectionResponseContext>.Descriptor);
-        }
+            /*
+             * Introspection response processing:
+             */
+            AttachHttpResponseCode<ApplyIntrospectionResponseContext>.Descriptor,
+            AttachWwwAuthenticateHeader<ApplyIntrospectionResponseContext>.Descriptor,
+            ProcessJsonResponse<ApplyIntrospectionResponseContext>.Descriptor
+        ]);
     }
 }

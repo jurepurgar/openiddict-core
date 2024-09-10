@@ -1,7 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>
+      $(NetFrameworkTargetFrameworks);
+      $(NetCoreTargetFrameworks);
+      $(NetStandardTargetFrameworks)
+    </TargetFrameworks>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IncludeInternalExtensions>false</IncludeInternalExtensions>
+    <PolySharpIncludeGeneratedTypes>System.Diagnostics.CodeAnalysis.StringSyntaxAttribute</PolySharpIncludeGeneratedTypes>
   </PropertyGroup>
 
   <PropertyGroup>

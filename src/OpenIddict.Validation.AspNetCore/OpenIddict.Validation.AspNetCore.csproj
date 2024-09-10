@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;netcoreapp2.1;netcoreapp3.1;net5.0</TargetFrameworks>
+    <TargetFrameworks>$(NetFrameworkTargetFrameworks);$(NetCoreTargetFrameworks)</TargetFrameworks>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -19,8 +19,23 @@
   </ItemGroup>
 
   <ItemGroup
-    Condition=" '$(TargetFrameworkIdentifier)' != '.NETCoreApp' Or $([MSBuild]::VersionLessThan($(TargetFrameworkVersion), '3.0')) ">
+    Condition=" ('$(TargetFrameworkIdentifier)' == '.NETCoreApp' And $([MSBuild]::VersionLessThan($(TargetFrameworkVersion), '3.0'))) Or
+                ('$(TargetFrameworkIdentifier)' == '.NETFramework') Or
+                ('$(TargetFrameworkIdentifier)' == '.NETStandard') ">
     <PackageReference Include="Microsoft.AspNetCore.Authentication" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.AspNetCore.Authentication" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="OpenIddict.Abstractions" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictConstants" Static="true" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictResources" Alias="SR" />
+    <Using Include="OpenIddict.Validation.OpenIddictValidationEvents" Static="true" />
+    <Using Include="OpenIddict.Validation.OpenIddictValidationHandlers" Static="true" />
+    <Using Include="OpenIddict.Validation.OpenIddictValidationHandlerFilters" Static="true" />
+    <Using Include="OpenIddict.Validation.AspNetCore.OpenIddictValidationAspNetCoreHandlers" Static="true" />
+    <Using Include="OpenIddict.Validation.AspNetCore.OpenIddictValidationAspNetCoreHandlerFilters" Static="true" />
   </ItemGroup>
 
 </Project>

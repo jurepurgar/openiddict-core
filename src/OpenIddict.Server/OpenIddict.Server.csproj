@@ -1,7 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;net472;net48;netcoreapp2.1;netcoreapp3.1;net5.0;netstandard2.0;netstandard2.1</TargetFrameworks>
+    <TargetFrameworks>
+      $(NetFrameworkTargetFrameworks);
+      $(NetCoreTargetFrameworks);
+      $(NetStandardTargetFrameworks)
+    </TargetFrameworks>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -21,10 +25,13 @@ To use the server feature on ASP.NET Core or OWIN/Katana, reference the OpenIddi
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
   </ItemGroup>
 
-  <ItemGroup
-    Condition=" ('$(TargetFrameworkIdentifier)' == '.NETFramework') Or
-                ('$(TargetFrameworkIdentifier)' == '.NETStandard' And $([MSBuild]::VersionLessThan($(TargetFrameworkVersion), '2.1'))) ">
-    <PackageReference Include="Portable.BouncyCastle" />
+  <ItemGroup>
+    <Using Include="OpenIddict.Abstractions" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictConstants" Static="true" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictResources" Alias="SR" />
+    <Using Include="OpenIddict.Server.OpenIddictServerEvents" Static="true" />
+    <Using Include="OpenIddict.Server.OpenIddictServerHandlers" Static="true" />
+    <Using Include="OpenIddict.Server.OpenIddictServerHandlerFilters" Static="true" />
   </ItemGroup>
 
 </Project>

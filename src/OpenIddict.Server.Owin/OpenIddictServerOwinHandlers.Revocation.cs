@@ -5,28 +5,30 @@
  */
 
 using System.Collections.Immutable;
-using static OpenIddict.Server.OpenIddictServerEvents;
 
-namespace OpenIddict.Server.Owin
+namespace OpenIddict.Server.Owin;
+
+public static partial class OpenIddictServerOwinHandlers
 {
-    public static partial class OpenIddictServerOwinHandlers
+    public static class Revocation
     {
-        public static class Revocation
-        {
-            public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
-                /*
-                 * Revocation request extraction:
-                 */
-                ExtractPostRequest<ExtractRevocationRequestContext>.Descriptor,
-                ExtractBasicAuthenticationCredentials<ExtractRevocationRequestContext>.Descriptor,
+        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create([
+            /*
+             * Revocation request extraction:
+             */
+            ExtractPostRequest<ExtractRevocationRequestContext>.Descriptor,
+            ValidateClientAuthenticationMethod<ExtractRevocationRequestContext>.Descriptor,
+            ExtractBasicAuthenticationCredentials<ExtractRevocationRequestContext>.Descriptor,
 
-                /*
-                 * Revocation response processing:
-                 */
-                AttachHttpResponseCode<ApplyRevocationResponseContext>.Descriptor,
-                AttachCacheControlHeader<ApplyRevocationResponseContext>.Descriptor,
-                AttachWwwAuthenticateHeader<ApplyRevocationResponseContext>.Descriptor,
-                ProcessJsonResponse<ApplyRevocationResponseContext>.Descriptor);
-        }
+            /*
+             * Revocation response processing:
+             */
+            AttachHttpResponseCode<ApplyRevocationResponseContext>.Descriptor,
+            AttachOwinResponseChallenge<ApplyRevocationResponseContext>.Descriptor,
+            SuppressFormsAuthenticationRedirect<ApplyRevocationResponseContext>.Descriptor,
+            AttachCacheControlHeader<ApplyRevocationResponseContext>.Descriptor,
+            AttachWwwAuthenticateHeader<ApplyRevocationResponseContext>.Descriptor,
+            ProcessJsonResponse<ApplyRevocationResponseContext>.Descriptor
+        ]);
     }
 }

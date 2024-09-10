@@ -4,14 +4,14 @@
  * the license and the contributors participating to this project.
  */
 
-using System.IO;
+using System.ComponentModel;
 using System.Security.Claims;
 
-namespace OpenIddict.Server.DataProtection
+namespace OpenIddict.Server.DataProtection;
+
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public interface IOpenIddictServerDataProtectionFormatter
 {
-    public interface IOpenIddictServerDataProtectionFormatter
-    {
-        ClaimsPrincipal ReadToken(BinaryReader reader);
-        void WriteToken(BinaryWriter writer, ClaimsPrincipal principal);
-    }
+    ClaimsPrincipal ReadToken(BinaryReader reader);
+    void WriteToken(BinaryWriter writer, ClaimsPrincipal principal);
 }

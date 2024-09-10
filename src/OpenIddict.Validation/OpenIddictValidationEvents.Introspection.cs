@@ -5,148 +5,149 @@
  */
 
 using System.Security.Claims;
-using OpenIddict.Abstractions;
 
-namespace OpenIddict.Validation
+namespace OpenIddict.Validation;
+
+public static partial class OpenIddictValidationEvents
 {
-    public static partial class OpenIddictValidationEvents
+    /// <summary>
+    /// Represents an event called for each request to the introspection endpoint
+    /// to give the user code a chance to add parameters to the introspection request.
+    /// </summary>
+    public sealed class PrepareIntrospectionRequestContext : BaseExternalContext
     {
         /// <summary>
-        /// Represents an event called for each request to the introspection endpoint
-        /// to give the user code a chance to add parameters to the introspection request.
+        /// Creates a new instance of the <see cref="PrepareIntrospectionRequestContext"/> class.
         /// </summary>
-        public class PrepareIntrospectionRequestContext : BaseExternalContext
+        public PrepareIntrospectionRequestContext(OpenIddictValidationTransaction transaction)
+            : base(transaction)
         {
-            /// <summary>
-            /// Creates a new instance of the <see cref="PrepareIntrospectionRequestContext"/> class.
-            /// </summary>
-            public PrepareIntrospectionRequestContext(OpenIddictValidationTransaction transaction)
-                : base(transaction)
-            {
-            }
-
-            /// <summary>
-            /// Gets or sets the request.
-            /// </summary>
-            public OpenIddictRequest Request
-            {
-                get => Transaction.Request!;
-                set => Transaction.Request = value;
-            }
-
-            /// <summary>
-            /// Gets or sets the token sent to the introspection endpoint.
-            /// </summary>
-            public string? Token { get; set; }
-
-            /// <summary>
-            /// Gets or sets the token type sent to the introspection endpoint.
-            /// </summary>
-            public string? TokenType { get; set; }
         }
 
         /// <summary>
-        /// Represents an event called for each request to the introspection endpoint
-        /// to send the introspection request to the remote authorization server.
+        /// Gets or sets the request.
         /// </summary>
-        public class ApplyIntrospectionRequestContext : BaseExternalContext
+        public OpenIddictRequest Request
         {
-            /// <summary>
-            /// Creates a new instance of the <see cref="ApplyIntrospectionRequestContext"/> class.
-            /// </summary>
-            public ApplyIntrospectionRequestContext(OpenIddictValidationTransaction transaction)
-                : base(transaction)
-            {
-            }
-
-            /// <summary>
-            /// Gets or sets the request.
-            /// </summary>
-            public OpenIddictRequest Request
-            {
-                get => Transaction.Request!;
-                set => Transaction.Request = value;
-            }
+            get => Transaction.Request!;
+            set => Transaction.Request = value;
         }
 
         /// <summary>
-        /// Represents an event called for each introspection response
-        /// to extract the response parameters from the server response.
+        /// Gets or sets the token sent to the introspection endpoint.
         /// </summary>
-        public class ExtractIntrospectionResponseContext : BaseExternalContext
+        public string? Token
         {
-            /// <summary>
-            /// Creates a new instance of the <see cref="ExtractIntrospectionResponseContext"/> class.
-            /// </summary>
-            public ExtractIntrospectionResponseContext(OpenIddictValidationTransaction transaction)
-                : base(transaction)
-            {
-            }
-
-            /// <summary>
-            /// Gets or sets the request.
-            /// </summary>
-            public OpenIddictRequest Request
-            {
-                get => Transaction.Request!;
-                set => Transaction.Request = value;
-            }
-
-            /// <summary>
-            /// Gets or sets the response, or <c>null</c> if it wasn't extracted yet.
-            /// </summary>
-            public OpenIddictResponse? Response
-            {
-                get => Transaction.Response;
-                set => Transaction.Response = value;
-            }
+            get => Request.Token;
+            set => Request.Token = value;
         }
 
         /// <summary>
-        /// Represents an event called for each validated introspection response.
+        /// Gets or sets the token type sent to the introspection endpoint.
         /// </summary>
-        public class HandleIntrospectionResponseContext : BaseExternalContext
+        public string? TokenTypeHint
         {
-            /// <summary>
-            /// Creates a new instance of the <see cref="HandleIntrospectionResponseContext"/> class.
-            /// </summary>
-            public HandleIntrospectionResponseContext(OpenIddictValidationTransaction transaction)
-                : base(transaction)
-            {
-            }
-
-            /// <summary>
-            /// Gets or sets the request.
-            /// </summary>
-            public OpenIddictRequest Request
-            {
-                get => Transaction.Request!;
-                set => Transaction.Request = value;
-            }
-
-            /// <summary>
-            /// Gets or sets the response.
-            /// </summary>
-            public OpenIddictResponse Response
-            {
-                get => Transaction.Response!;
-                set => Transaction.Response = value;
-            }
-
-            /// <summary>
-            /// Gets or sets the token sent to the introspection endpoint.
-            /// </summary>
-            public string? Token { get; set; }
-
-            /// <summary>
-            /// Gets or sets the token type sent to the introspection endpoint.
-            /// </summary>
-            public string? TokenType { get; set; }
-
-            /// <summary>
-            /// Gets or sets the principal containing the claims resolved from the introspection response.
-            /// </summary>
-            public ClaimsPrincipal? Principal { get; set; }
+            get => Request.TokenTypeHint;
+            set => Request.TokenTypeHint = value;
         }
+    }
+
+    /// <summary>
+    /// Represents an event called for each request to the introspection endpoint
+    /// to send the introspection request to the remote authorization server.
+    /// </summary>
+    public sealed class ApplyIntrospectionRequestContext : BaseExternalContext
+    {
+        /// <summary>
+        /// Creates a new instance of the <see cref="ApplyIntrospectionRequestContext"/> class.
+        /// </summary>
+        public ApplyIntrospectionRequestContext(OpenIddictValidationTransaction transaction)
+            : base(transaction)
+        {
+        }
+
+        /// <summary>
+        /// Gets or sets the request.
+        /// </summary>
+        public OpenIddictRequest Request
+        {
+            get => Transaction.Request!;
+            set => Transaction.Request = value;
+        }
+    }
+
+    /// <summary>
+    /// Represents an event called for each introspection response
+    /// to extract the response parameters from the server response.
+    /// </summary>
+    public sealed class ExtractIntrospectionResponseContext : BaseExternalContext
+    {
+        /// <summary>
+        /// Creates a new instance of the <see cref="ExtractIntrospectionResponseContext"/> class.
+        /// </summary>
+        public ExtractIntrospectionResponseContext(OpenIddictValidationTransaction transaction)
+            : base(transaction)
+        {
+        }
+
+        /// <summary>
+        /// Gets or sets the request.
+        /// </summary>
+        public OpenIddictRequest Request
+        {
+            get => Transaction.Request!;
+            set => Transaction.Request = value;
+        }
+
+        /// <summary>
+        /// Gets or sets the response, or <see langword="null"/> if it wasn't extracted yet.
+        /// </summary>
+        public OpenIddictResponse? Response
+        {
+            get => Transaction.Response;
+            set => Transaction.Response = value;
+        }
+    }
+
+    /// <summary>
+    /// Represents an event called for each introspection response.
+    /// </summary>
+    public sealed class HandleIntrospectionResponseContext : BaseExternalContext
+    {
+        /// <summary>
+        /// Creates a new instance of the <see cref="HandleIntrospectionResponseContext"/> class.
+        /// </summary>
+        public HandleIntrospectionResponseContext(OpenIddictValidationTransaction transaction)
+            : base(transaction)
+        {
+        }
+
+        /// <summary>
+        /// Gets or sets the request.
+        /// </summary>
+        public OpenIddictRequest Request
+        {
+            get => Transaction.Request!;
+            set => Transaction.Request = value;
+        }
+
+        /// <summary>
+        /// Gets or sets the response.
+        /// </summary>
+        public OpenIddictResponse Response
+        {
+            get => Transaction.Response!;
+            set => Transaction.Response = value;
+        }
+
+        /// <summary>
+        /// Gets or sets the token sent to the introspection endpoint.
+        /// </summary>
+        public string? Token { get; set; }
+
+        /// <summary>
+        /// Gets or sets the principal containing the claims resolved from the introspection response.
+        /// </summary>
+        public ClaimsPrincipal? Principal { get; set; }
     }
 }

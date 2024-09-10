@@ -1,0 +1,77 @@
+﻿@using System.Security.Claims
+@using Microsoft.Owin
+@using Microsoft.Owin.Security
+@using Microsoft.Owin.Security.Cookies
+@using OpenIddict.Abstractions
+@using OpenIddict.Client.Owin
+@using OpenIddict.Sandbox.AspNet.Client.ViewModels.Home;
+@model IndexViewModel
+
+<div class="jumbotron">
+    @if (User?.Identity is { IsAuthenticated: true })
+    {
+        <h1>Welcome, @User.Identity.Name</h1>
+
+        <p>
+            @foreach (var claim in ((ClaimsPrincipal) Context.User).Claims)
+            {
+                <div>@claim.Type: <b>@claim.Value</b></div>
+            }
+        </p>
+
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <h3>Payload returned by the controller: @Model.Message</h3>
+        }
+
+        if (User is ClaimsPrincipal principal && principal.FindFirst(OpenIddictConstants.Claims.Private.ProviderName)?.Value is "Local")
+        {
+            <form action="/message" method="post">
+                @Html.AntiForgeryToken()
+
+                <button class="btn btn-lg btn-warning" type="submit">Query the resource controller</button>
+            </form>
+        }
+
+        if (Context.GetOwinContext() is IOwinContext context &&
+            context.Authentication.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationType).Result is AuthenticateResult result &&
+            result.Properties.Dictionary.ContainsKey(OpenIddictClientOwinConstants.Tokens.RefreshToken))
+        {
+            <form action="/refresh-token" method="post">
+                @Html.AntiForgeryToken()
+
+                <button class="btn btn-lg btn-warning" type="submit">Refresh the access token</button>
+            </form>
+        }
+
+        <form action="/logout" method="post">
+            @Html.AntiForgeryToken()
+
+            <input type="hidden" name="returnUrl" value="@Request.RawUrl" />
+
+            <button class="btn btn-lg btn-danger" type="submit">Sign out</button>
+        </form>
+    }
+
+    else
+    {
+        <h1>Welcome, anonymous</h1>
+
+        <form action="/login" method="post">
+            @Html.AntiForgeryToken()
+
+            <input type="hidden" name="returnUrl" value="@Request.RawUrl" />
+
+            <button class="btn btn-lg btn-success" type="submit" name="provider" value="Local+GitHub">
+                Sign in using Local OIDC server (preferred service: GitHub)
+            </button>
+
+            @foreach (var provider in Model.Providers)
+            {
+                <button class="btn btn-lg btn-success" type="submit" name="provider" value="@provider.ProviderName">
+                    Sign in using @provider.ProviderDisplayName
+                </button>
+            }
+        </form>
+    }
+</div>
